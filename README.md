@@ -9,7 +9,7 @@
 
 ## Установка
 
-Нужен Node.js ≥ 24.
+Нужен Node.js ≥ 24 (либо собранный бинарник — см. «Разработка» в конце).
 
 ```sh
 npm install
@@ -38,9 +38,30 @@ subs-translate movie.srt --dry-run            # показать полный п
 subs-translate movie.srt --about-file movie.about.md
 subs-translate movie.srt -o out/ru.srt
 subs-translate movie.srt --price-in 0.3 --price-out 1.2   # + оценка стоимости
+subs-translate movie.mkv                      # видео: список встроенных дорожек и выход
+subs-translate movie.mkv --sub-track 0        # видео: извлечь дорожку 0 и переводить её
 ```
 
 Прогресс (реплика k/n, время, ETA, токены) идёт в stderr; stdout остаётся чистым. `-q` выключает прогресс.
+
+### Видео со встроенными субтитрами
+
+Вместо `.srt` можно скормить видеофайл — субтитры вытаскиваются системными `ffprobe`/`ffmpeg`
+(должны быть в PATH; бандлить их с утилитой не нужно):
+
+```sh
+subs-translate movie.mkv                  # печатает список встроенных дорожек и выходит
+subs-translate movie.mkv --sub-track 0    # извлечь дорожку 0 и переводить её
+```
+
+- без `--sub-track` печатается таблица дорожек: номер (то, что идёт в `--sub-track`),
+  кодек, язык, заголовок; растровые дорожки (PGS, DVD/VobSub, DVB) помечены — их
+  в текст не извлечь;
+- с `--sub-track N` дорожка конвертируется в SRT и сохраняется рядом с видео
+  (`movie.track0.eng.srt`, язык берётся из метаданных), дальше весь пайплайн работает
+  с этим файлом: выход — `movie.track0.eng.ru.srt`, sidecar и `--resume` как обычно;
+- если рядом с видео лежит `movie.about.md`, он подхватывается и для извлечённого входа;
+- повторный запуск перезаписывает извлечённый файл (это дёшево) и продолжает по sidecar.
 
 ### Чистка входа
 
@@ -62,6 +83,7 @@ subs-translate movie.srt --price-in 0.3 --price-out 1.2   # + оценка ст�
 |---|---|---|
 | `-o, --out <path>` | `<input>.ru.srt` | выходной файл; вход никогда не перезаписывается |
 | `--about <text>` / `--about-file <path>` | `<input>.about.md`, если есть | синопсис + глоссарий, см. ниже |
+| `--sub-track <n>` | — | дорожка встроенных субтитров видео; для видео без флага — печатается список |
 | `--from` / `--to` | авто / `Russian` | языки |
 | `--context-before <n>` / `--context-after <n>` | 3 / 3 | окно контекста (перевод до, оригинал после) |
 | `--concurrency <n>` | 1 | параллельные вызовы, см. «Скорость» |
@@ -198,8 +220,26 @@ npm run check       # и то и другое
 ```
 
 Тесты — `node:test`, без внешних зависимостей: round-trip SRT, cp1251, чистка входа,
-переносы, resume/assembly, санитайзер и логика ретраев (со стабом вместо API).
+переносы, resume/assembly, санитайзер и логика ретраев (со стабом вместо API), разбор
+ffprobe-вывода и извлечение встроенных субтитров через ffmpeg (последний сам
+пропускается, если ffmpeg не установлен).
 
-Сборка в самодостаточный бинарник (например, для NAS без Node): бандлить esbuild'ом
-(`esbuild bin/subs-translate.ts --bundle --platform=node`) и дальше — Node SEA или
-`bun build --compile` на получившемся файле.
+Сборка в самодостаточный бинарник (без Node.js на целевой машине) — через Bun
+(`bun build --compile` embed'ит рантайм в ELF/PE-бинарник). Нужен только Bun
+на машине сборки; для целевой машины ничего не нужно, кроме amd64 и glibc
+(или musl для Alpine):
+
+```sh
+npm run build:binary              # linux-x64  → dist/subs-translate-linux-x64
+npm run build:binary:linux-musl   # alpine     → dist/subs-translate-linux-x64-musl
+npm run build:binary:windows      # windows    → dist/subs-translate-windows-x64.exe
+npm run build:binary:mac          # macOS x64  → dist/subs-translate-darwin-x64
+npm run build:binary:all          # все четыре
+```
+
+Кросс-компиляция работает из любой ОС: таргет задаётся флагом `--target`.
+Бинарники получаются ~100 МБ (внутри рантайм). Проверка:
+
+```sh
+./dist/subs-translate-linux-x64 subs.srt --dry-run
+```

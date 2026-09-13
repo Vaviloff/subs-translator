@@ -12,17 +12,21 @@ import type { RetryInfo } from '../src/translate.ts';
 import { createPool, loadEndpoints } from '../src/endpoints.ts';
 import { ProgressStore, assemble, sidecarPath } from '../src/progress.ts';
 import { createContext, pendingCues, runTranslation } from '../src/run.ts';
+import { extractSubtitle, extractedPath, formatTrackList, listSubtitleStreams } from '../src/video.ts';
+import type { SubStream } from '../src/video.ts';
 import type { Pool } from '../src/types.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
 
 Использование:
-  subs-translate <input.srt> [options]
+  subs-translate <input.srt | video> [options]
 
 Опции:
   -o, --out <path>            выходной файл (по умолчанию <input>.ru.srt)
       --about <text>          синопсис текстом
       --about-file <path>     синопсис из файла (по умолчанию <input>.about.md, если есть)
+      --sub-track <n>         извлечь встроенную дорожку <n> из видео и переводить её;
+                              видео без этого флага — печатает список дорожек и выходит
       --from <lang>           исходный язык (по умолчанию: авто)
       --to <lang>             язык перевода (по умолчанию: Russian)
       --context-before <n>    сколько предыдущих реплик давать как перевод (3)
@@ -110,6 +114,7 @@ function parseCliArgs() {
         out: { type: 'string', short: 'o' },
         about: { type: 'string' },
         'about-file': { type: 'string' },
+        'sub-track': { type: 'string' },
         from: { type: 'string' },
         to: { type: 'string' },
         'context-before': { type: 'string' },
@@ -139,13 +144,61 @@ async function main(): Promise<number> {
   const parsed = parseCliArgs();
   const values = parsed.values;
   if (parsed.positionals.length !== 1) {
-    die(`expected exactly one input .srt file\n\n${USAGE}`);
+    die(`expected exactly one input file: an .srt or a video\n\n${USAGE}`);
   }
 
   const inputPath = path.resolve(parsed.positionals[0]);
   if (!existsSync(inputPath)) die(`input file not found: ${inputPath}`);
-  const outPath = path.resolve(values.out ?? defaultOutputPath(inputPath));
-  if (outPath === inputPath) die('refusing to overwrite the input file: use -o <path>');
+  const subTrack = intOption(values, 'sub-track');
+
+  const inputIsSrt = /\.srt$/i.test(inputPath);
+  if (subTrack !== undefined && inputIsSrt) {
+    die('--sub-track применяется к видеофайлам; вход .srt уже является субтитрами');
+  }
+
+  let effectiveInput = inputPath;
+  if (!inputIsSrt) {
+    let streams: SubStream[];
+    try {
+      streams = listSubtitleStreams(inputPath);
+    } catch (err) {
+      die(`${(err as Error).message} — ожидался .srt или видеофайл со встроенными субтитрами`);
+    }
+    if (!streams.length) die(`нет встроенных субтитровых дорожек: ${path.basename(inputPath)}`);
+
+    if (subTrack === undefined) {
+      console.log(`Встроенные субтитры в ${path.basename(inputPath)}:`);
+      for (const line of formatTrackList(streams)) console.log(`  ${line}`);
+      const arg = path.relative(process.cwd(), inputPath) || inputPath;
+      console.log(`\nВыберите дорожку: subs-translate ${arg} --sub-track <номер>`);
+      return 0;
+    }
+
+    const stream = streams.find((s) => s.track === subTrack);
+    if (!stream) die(`--sub-track ${subTrack} вне диапазона: доступные дорожки — 0..${streams.length - 1}`);
+    if (stream.isBitmap) {
+      die(`--sub-track ${subTrack}: растровая дорожка (${stream.codecName}) не извлекается в текст`);
+    }
+    let data: Uint8Array;
+    try {
+      data = extractSubtitle(inputPath, stream.track);
+    } catch (err) {
+      die((err as Error).message);
+    }
+    const extracted = extractedPath(inputPath, stream.track, stream.language);
+    try {
+      writeFileSync(extracted, data);
+    } catch (err) {
+      die(`cannot write ${extracted}: ${(err as Error).message}`);
+    }
+    console.error(`Субтитры извлечены: ${extracted} (${parse(data).cues.length} реплик)`);
+    effectiveInput = extracted;
+  }
+
+  const outPath = path.resolve(values.out ?? defaultOutputPath(effectiveInput));
+  if (outPath === inputPath || outPath === effectiveInput) {
+    die('refusing to overwrite the input file: use -o <path>');
+  }
 
   const contextBefore = intOption(values, 'context-before') ?? 3;
   const contextAfter = intOption(values, 'context-after') ?? 3;
@@ -175,7 +228,7 @@ async function main(): Promise<number> {
     }
   }
 
-  const rawCues = parse(readFileSync(inputPath)).cues;
+  const rawCues = parse(readFileSync(effectiveInput)).cues;
   const { cues, stats: cleaned } = cleanCues(rawCues);
   if (!cues.length) die('no subtitle cues found in the input');
   if (!quiet && (cleaned.sdhCues || cleaned.sdhLines || cleaned.merged)) {
@@ -207,7 +260,11 @@ async function main(): Promise<number> {
 
   let about: string | null = null;
   try {
-    about = discoverAbout(inputPath, { about: values.about, aboutFile: values['about-file'] });
+    about = discoverAbout(effectiveInput, { about: values.about, aboutFile: values['about-file'] });
+    if (about === null && effectiveInput !== inputPath) {
+      // для извлечённого входа подхватываем about-файл, лежащий рядом с видео
+      about = discoverAbout(inputPath, { about: values.about, aboutFile: values['about-file'] });
+    }
   } catch (err) {
     die((err as Error).message);
   }
@@ -306,7 +363,7 @@ async function main(): Promise<number> {
     console.error(`Прогресс сохранён в ${sidecar}`);
     const rangePart = values.range !== undefined ? ` --range ${values.range}` : '';
     console.error(
-      `Продолжить: subs-translate ${path.relative(process.cwd(), inputPath) || inputPath} --resume${rangePart}`,
+      `Продолжить: subs-translate ${path.relative(process.cwd(), effectiveInput) || effectiveInput} --resume${rangePart}`,
     );
   };
   const onInterrupt = (signal: string): void => {

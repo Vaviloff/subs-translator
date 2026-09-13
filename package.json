@@ -10,7 +10,12 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "build:binary": "bun build --compile --target=bun-linux-x64 bin/subs-translate.ts --outfile dist/subs-translate-linux-x64",
+    "build:binary:linux-musl": "bun build --compile --target=bun-linux-x64-musl bin/subs-translate.ts --outfile dist/subs-translate-linux-x64-musl",
+    "build:binary:windows": "bun build --compile --target=bun-windows-x64 bin/subs-translate.ts --outfile dist/subs-translate-windows-x64.exe",
+    "build:binary:mac": "bun build --compile --target=bun-darwin-x64 bin/subs-translate.ts --outfile dist/subs-translate-darwin-x64",
+    "build:binary:all": "npm run build:binary && npm run build:binary:linux-musl && npm run build:binary:windows && npm run build:binary:mac"
   },
   "engines": {
     "node": ">=24"
