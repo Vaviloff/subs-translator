@@ -1,0 +1,23 @@
+1
+00:00:01,000 --> 00:00:03,500 X1:40 X2:600 Y1:20 Y2:60
+<i>Previously</i> on "The Division":
+
+2
+00:00:04 --> 00:00:06
+{\an8}Where's Hollis?
+Gone since Tuesday.
+
+3
+00:00:06,500 --> 00:00:08,000
+[DOOR SLAMS]
+Don't ask me twice.
+
+WEBVTT junk header that must be skipped
+
+7
+00:00:10,000 --> 00:00:12,000
+He didn't <i>leave</i>.
+He was taken.
+
+00:00:13,000 --> 00:00:14,500
+No index on this one.

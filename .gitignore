@@ -1,0 +1,5 @@
+node_modules/
+.env
+endpoints.json
+*.progress.jsonl
+*.ru.srt

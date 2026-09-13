@@ -1,0 +1,25 @@
+{
+  "name": "subs-translator",
+  "version": "0.1.0",
+  "description": "Translate .srt subtitles cue-by-cue with film context, a synopsis, and a name glossary against an OpenAI-compatible endpoint",
+  "type": "module",
+  "bin": {
+    "subs-translate": "bin/subs-translate.js"
+  },
+  "main": "bin/subs-translate.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "keywords": [
+    "subtitles",
+    "srt",
+    "translation"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^5.23.2"
+  }
+}
