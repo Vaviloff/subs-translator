@@ -3,3 +3,4 @@ node_modules/
 endpoints.json
 *.progress.jsonl
 *.ru.srt
+dist/

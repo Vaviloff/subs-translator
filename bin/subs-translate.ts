@@ -12,8 +12,9 @@ import type { RetryInfo } from '../src/translate.ts';
 import { createPool, loadEndpoints } from '../src/endpoints.ts';
 import { ProgressStore, assemble, sidecarPath } from '../src/progress.ts';
 import { createContext, pendingCues, runTranslation } from '../src/run.ts';
-import { extractSubtitle, extractedPath, formatTrackList, listSubtitleStreams } from '../src/video.ts';
-import type { SubStream } from '../src/video.ts';
+import { extractSubtitle, extractedPath, formatAudioTrackList, formatTrackList, listAudioStreams, listSubtitleStreams } from '../src/video.ts';
+import type { AudioStream, SubStream } from '../src/video.ts';
+import { assertSttConfig, resolveSttConfig, transcribeAudioTrack } from '../src/stt.ts';
 import type { Pool } from '../src/types.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
@@ -25,8 +26,14 @@ const USAGE = `subs-translate — переводит .srt реплика за р
   -o, --out <path>            выходной файл (по умолчанию <input>.ru.srt)
       --about <text>          синопсис текстом
       --about-file <path>     синопсис из файла (по умолчанию <input>.about.md, если есть)
-      --sub-track <n>         извлечь встроенную дорожку <n> из видео и переводить её;
-                              видео без этого флага — печатает список дорожек и выходит
+      --sub-track <n>         извлечь встроенную дорожку субтитров <n> из видео и переводить её
+      --audio-track <n>       транскрибировать аудиодорожку <n> через Whisper и переводить её
+                              (STT_MODEL + STT_API_KEY/GROQ_API_TOKEN в .env)
+      --stt-model <id>        модель STT (env STT_MODEL; обязателен для --audio-track)
+      --stt-base-url <url>    OpenAI-совместимый STT endpoint (env STT_BASE_URL; по умолчанию Groq)
+      --stt-api-key <key>     ключ STT (env STT_API_KEY || GROQ_API_TOKEN)
+      --stt-lang <iso>        язык речи, ISO-639-1 (необязательно, улучшает точность)
+      --stt-limit <n>         транскрибировать только первые n чанков (пробный прогон)
       --from <lang>           исходный язык (по умолчанию: авто)
       --to <lang>             язык перевода (по умолчанию: Russian)
       --context-before <n>    сколько предыдущих реплик давать как перевод (3)
@@ -115,6 +122,12 @@ function parseCliArgs() {
         about: { type: 'string' },
         'about-file': { type: 'string' },
         'sub-track': { type: 'string' },
+        'audio-track': { type: 'string' },
+        'stt-model': { type: 'string' },
+        'stt-base-url': { type: 'string' },
+        'stt-api-key': { type: 'string' },
+        'stt-lang': { type: 'string' },
+        'stt-limit': { type: 'string' },
         from: { type: 'string' },
         to: { type: 'string' },
         'context-before': { type: 'string' },
@@ -150,14 +163,21 @@ async function main(): Promise<number> {
   const inputPath = path.resolve(parsed.positionals[0]);
   if (!existsSync(inputPath)) die(`input file not found: ${inputPath}`);
   const subTrack = intOption(values, 'sub-track');
+  const audioTrack = intOption(values, 'audio-track');
+  const sttLimit = intOption(values, 'stt-limit', { min: 1 });
+  const quiet = values.quiet;
 
   const inputIsSrt = /\.srt$/i.test(inputPath);
-  if (subTrack !== undefined && inputIsSrt) {
-    die('--sub-track применяется к видеофайлам; вход .srt уже является субтитрами');
+  if (inputIsSrt) {
+    if (subTrack !== undefined) die('--sub-track применяется к видеофайлам; вход .srt уже является субтитрами');
+    if (audioTrack !== undefined) die('--audio-track применяется к видеофайлам; вход .srt уже является субтитрами');
+  }
+  if (subTrack !== undefined && audioTrack !== undefined) {
+    die('--sub-track и --audio-track взаимоисключающие — выберите одну дорожку');
   }
 
   let effectiveInput = inputPath;
-  if (!inputIsSrt) {
+  if (!inputIsSrt && subTrack !== undefined) {
     let streams: SubStream[];
     try {
       streams = listSubtitleStreams(inputPath);
@@ -165,14 +185,6 @@ async function main(): Promise<number> {
       die(`${(err as Error).message} — ожидался .srt или видеофайл со встроенными субтитрами`);
     }
     if (!streams.length) die(`нет встроенных субтитровых дорожек: ${path.basename(inputPath)}`);
-
-    if (subTrack === undefined) {
-      console.log(`Встроенные субтитры в ${path.basename(inputPath)}:`);
-      for (const line of formatTrackList(streams)) console.log(`  ${line}`);
-      const arg = path.relative(process.cwd(), inputPath) || inputPath;
-      console.log(`\nВыберите дорожку: subs-translate ${arg} --sub-track <номер>`);
-      return 0;
-    }
 
     const stream = streams.find((s) => s.track === subTrack);
     if (!stream) die(`--sub-track ${subTrack} вне диапазона: доступные дорожки — 0..${streams.length - 1}`);
@@ -193,6 +205,73 @@ async function main(): Promise<number> {
     }
     console.error(`Субтитры извлечены: ${extracted} (${parse(data).cues.length} реплик)`);
     effectiveInput = extracted;
+  } else if (!inputIsSrt && audioTrack !== undefined) {
+    let streams: AudioStream[];
+    try {
+      streams = listAudioStreams(inputPath);
+    } catch (err) {
+      die(`${(err as Error).message} — ожидался .srt или видеофайл со звуковой дорожкой`);
+    }
+    if (!streams.length) die(`нет аудиодорожек: ${path.basename(inputPath)}`);
+    if (!streams.some((s) => s.track === audioTrack)) {
+      die(`--audio-track ${audioTrack} вне диапазона: доступные дорожки — 0..${streams.length - 1}`);
+    }
+
+    const onSttRetry = ({ attempt, delay, err }: RetryInfo): void => {
+      if (quiet) return;
+      console.error(`повтор STT ${attempt}/5 через ${Math.round(delay / 1000)} с (${String((err as Error)?.message ?? err)})`);
+    };
+    try {
+      const sttConfig = resolveSttConfig({
+        apiKey: values['stt-api-key'],
+        baseUrl: values['stt-base-url'],
+        model: values['stt-model'],
+        language: values['stt-lang'],
+      });
+      assertSttConfig(sttConfig);
+      const stt = await transcribeAudioTrack({
+        videoPath: inputPath,
+        track: audioTrack,
+        config: sttConfig,
+        limit: sttLimit,
+        quiet,
+        onRetry: onSttRetry,
+      });
+      effectiveInput = stt.srtPath;
+    } catch (err) {
+      die((err as Error).message);
+    }
+  } else if (!inputIsSrt) {
+    let subStreams: SubStream[] = [];
+    try {
+      subStreams = listSubtitleStreams(inputPath);
+    } catch {
+      // ffprobe failures are reported by the audio probe below
+    }
+    let audioStreams: AudioStream[];
+    try {
+      audioStreams = listAudioStreams(inputPath);
+    } catch (err) {
+      die(`${(err as Error).message} — ожидался .srt или видеофайл`);
+    }
+    if (!subStreams.length && !audioStreams.length) {
+      die(`нет ни субтитровых, ни аудиодорожек: ${path.basename(inputPath)}`);
+    }
+    if (subStreams.length) {
+      console.log(`Встроенные субтитры в ${path.basename(inputPath)}:`);
+      for (const line of formatTrackList(subStreams)) console.log(`  ${line}`);
+    } else {
+      console.log(`Встроенных субтитров нет: ${path.basename(inputPath)}`);
+    }
+    console.log(`\nАудиодорожки в ${path.basename(inputPath)}:`);
+    for (const line of formatAudioTrackList(audioStreams)) console.log(`  ${line}`);
+    const arg = path.relative(process.cwd(), inputPath) || inputPath;
+    console.log(`\nПеревести дорожку субтитров: subs-translate ${arg} --sub-track <номер>`);
+    console.log(
+      `Транскрибировать речь:      subs-translate ${arg} --audio-track <номер>` +
+        `  (нужны STT_MODEL и STT_API_KEY/GROQ_API_TOKEN в .env)`,
+    );
+    return 0;
   }
 
   const outPath = path.resolve(values.out ?? defaultOutputPath(effectiveInput));
@@ -208,7 +287,6 @@ async function main(): Promise<number> {
   const delayMs = intOption(values, 'delay') ?? 0;
   const priceIn = floatOption(values, 'price-in');
   const priceOut = floatOption(values, 'price-out');
-  const quiet = values.quiet;
 
   const config = resolveConfig({
     apiKey: values['api-key'],

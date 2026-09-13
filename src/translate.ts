@@ -70,7 +70,7 @@ interface ProviderError {
   error?: { message?: unknown } | undefined;
 }
 
-function isRetryable(err: unknown): boolean {
+export function isRetryable(err: unknown): boolean {
   const e = err as ProviderError | null | undefined;
   const status = e?.status;
   if (status === 429 || (typeof status === 'number' && status >= 500 && status < 600)) return true;
@@ -85,7 +85,7 @@ function isRetryable(err: unknown): boolean {
   return err instanceof OpenAI.APIConnectionError || err instanceof OpenAI.APIConnectionTimeoutError;
 }
 
-function retryAfterMs(err: unknown): number | null {
+export function retryAfterMs(err: unknown): number | null {
   const value = (err as ProviderError | null | undefined)?.headers?.get?.('retry-after');
   if (!value) return null;
   const seconds = Number(value);
@@ -124,12 +124,12 @@ function asPool(poolOrClient: Pool | CompletionClient, model: string | undefined
   };
 }
 
-const describeErr = (err: unknown): string => {
+export function describeErr(err: unknown): string {
   const e = err as ProviderError | null | undefined;
   return e?.status !== undefined
     ? `HTTP ${String(e.status)}: ${String(e.message ?? '')}`.trim()
     : String(e?.code ?? e?.message ?? 'error');
-};
+}
 
 export interface RetryInfo {
   attempt: number;
