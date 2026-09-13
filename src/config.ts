@@ -4,7 +4,21 @@ import path from 'node:path';
 export const DEFAULT_BASE_URL = 'https://api.paretoinference.com/v1';
 export const DEFAULT_MODEL = 'z-ai/glm-5.3-flash';
 
-export function resolveConfig({ apiKey, baseUrl, model } = {}) {
+export interface ResolvedConfig {
+  apiKey: string | null;
+  baseUrl: string;
+  model: string;
+}
+
+export function resolveConfig({
+  apiKey,
+  baseUrl,
+  model,
+}: {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+} = {}): ResolvedConfig {
   try {
     process.loadEnvFile();
   } catch {
@@ -17,7 +31,10 @@ export function resolveConfig({ apiKey, baseUrl, model } = {}) {
   };
 }
 
-export function discoverAbout(inputPath, { about, aboutFile } = {}) {
+export function discoverAbout(
+  inputPath: string,
+  { about, aboutFile }: { about?: string; aboutFile?: string } = {},
+): string | null {
   if (about !== undefined) return about.trim() || null;
   if (aboutFile !== undefined) {
     if (!existsSync(aboutFile)) {
@@ -32,7 +49,7 @@ export function discoverAbout(inputPath, { about, aboutFile } = {}) {
   return null;
 }
 
-export function defaultOutputPath(inputPath) {
+export function defaultOutputPath(inputPath: string): string {
   const ext = path.extname(inputPath);
   const base = ext ? inputPath.slice(0, -ext.length) : inputPath;
   return `${base}.ru.srt`;

@@ -1,5 +1,17 @@
-export function buildSystem({ target = 'Russian', source = 'auto', maxLineLen = 42, about = null }) {
-  const parts = [];
+import type { Cue, NextEntry, PrevEntry } from './types.ts';
+
+export function buildSystem({
+  target = 'Russian',
+  source = 'auto',
+  maxLineLen = 42,
+  about = null,
+}: {
+  target?: string;
+  source?: string;
+  maxLineLen?: number;
+  about?: string | null;
+} = {}): string {
+  const parts: string[] = [];
   parts.push(
     `You are a professional subtitle translator. Translate film subtitles into ${target}.`,
     source === 'auto'
@@ -21,8 +33,16 @@ export function buildSystem({ target = 'Russian', source = 'auto', maxLineLen = 
   return parts.join('\n');
 }
 
-export function buildUser({ cue, prev = [], next = [] }) {
-  const parts = [];
+export function buildUser({
+  cue,
+  prev = [],
+  next = [],
+}: {
+  cue: Cue;
+  prev?: PrevEntry[];
+  next?: NextEntry[];
+}): string {
+  const parts: string[] = [];
   if (prev.length) {
     parts.push('=== ЧТО УЖЕ ПЕРЕВЕДЕНО (предыдущие реплики) ===');
     for (const p of prev) {

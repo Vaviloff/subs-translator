@@ -1,8 +1,10 @@
+import type { Cue, ParsedSubs } from './types.ts';
+
 const BOM = '\uFEFF';
 const BLOCK_SPLIT = /\r?\n\s*\r?\n/;
 const OVERRIDES_RE = /^((?:\{\\(?:an\d+|pos|move|fade)\b[^}]*\})+)([\s\S]*)$/;
 
-function decode(buffer) {
+function decode(buffer: Uint8Array): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
   } catch {
@@ -10,14 +12,14 @@ function decode(buffer) {
   }
 }
 
-export function parse(buffer) {
+export function parse(buffer: Uint8Array): ParsedSubs {
   let text = decode(buffer);
   if (text.startsWith(BOM)) text = text.slice(1);
   const crlf = (text.match(/\r\n/g) ?? []).length;
   const lf = (text.match(/(?<!\r)\n/g) ?? []).length;
   const eol = crlf >= lf ? '\r\n' : '\n';
 
-  const cues = [];
+  const cues: Cue[] = [];
   let fallbackIndex = 1;
   for (const raw of text.split(BLOCK_SPLIT)) {
     const lines = raw.split(/\r?\n/).map((l) => l.trim());
@@ -36,7 +38,7 @@ export function parse(buffer) {
 
     const timing = lines[timingIdx];
     let body = lines.slice(timingIdx + 1);
-    let position = null;
+    let position: string | null = null;
     if (body.length) {
       const m = body[0].match(OVERRIDES_RE);
       if (m) {
@@ -51,7 +53,7 @@ export function parse(buffer) {
   return { cues, eol };
 }
 
-export function serialize(cues) {
+export function serialize(cues: Cue[]): string {
   const blocks = cues.map((cue) =>
     [
       String(cue.index),
@@ -62,8 +64,8 @@ export function serialize(cues) {
   return blocks.join('\r\n\r\n') + '\r\n\r\n';
 }
 
-function tokenize(text) {
-  const tokens = [];
+function tokenize(text: string): string[] {
+  const tokens: string[] = [];
   let cur = '';
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -88,8 +90,8 @@ function tokenize(text) {
   return tokens;
 }
 
-function fill(words, limit) {
-  const lines = [];
+function fill(words: string[], limit: number): string[] {
+  const lines: string[] = [];
   let cur = '';
   for (const w of words) {
     if (!cur) {
@@ -105,7 +107,7 @@ function fill(words, limit) {
   return lines;
 }
 
-export function wrap(text, maxLen = 42, maxLines = 2) {
+export function wrap(text: string, maxLen = 42, maxLines = 2): string[] {
   const paragraphs = String(text).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   if (!paragraphs.length) return [''];
   if (paragraphs.length <= maxLines && paragraphs.every((p) => p.length <= maxLen)) {

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse, serialize, wrap } from '../src/srt.js';
+import { parse, serialize, wrap } from '../src/srt.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = readFileSync(path.join(here, 'fixtures', 'sample.srt'));

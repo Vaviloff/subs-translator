@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import OpenAI from 'openai';
+import type { CompletionClient, CompletionLike, Pool, PoolEntry, TokenUsage } from './types.ts';
 
-export const BASE_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
+export const BASE_DELAYS_MS: number[] = [1000, 2000, 4000, 8000, 16000];
 const MAX_ATTEMPTS = 5;
 const MAX_RETRY_AFTER_MS = 60_000;
 
@@ -10,7 +11,7 @@ const META_RE =
 const PREFIX_RE = /^\s*(?:\*\*)?\s*(?:translation|перевод)\s*:\s*(?:\*\*)?\s*/i;
 const FENCE_OPEN_RE = /^\s*```[^\n]*\n?/;
 const FENCE_CLOSE_RE = /\n?```\s*$/;
-const QUOTE_PAIRS = [
+const QUOTE_PAIRS: [string, string][] = [
   ['«', '»'],
   ['“', '”'],
   ['„', '“'],
@@ -18,18 +19,20 @@ const QUOTE_PAIRS = [
 ];
 
 export class TranslationError extends Error {
-  constructor(message, { cueIndex = null, cause } = {}) {
-    super(message, cause ? { cause } : undefined);
+  cueIndex: number | null;
+
+  constructor(message: string, { cueIndex = null, cause }: { cueIndex?: number | null; cause?: unknown } = {}) {
+    super(message, cause !== undefined ? { cause } : undefined);
     this.name = 'TranslationError';
     this.cueIndex = cueIndex;
   }
 }
 
-export function sourceHash(src) {
+export function sourceHash(src: string): string {
   return createHash('sha256').update(src, 'utf8').digest('hex').slice(0, 12);
 }
 
-function stripWrappingQuotes(text) {
+function stripWrappingQuotes(text: string): string {
   for (const [open, close] of QUOTE_PAIRS) {
     if (text.length >= 2 && text.startsWith(open) && text.endsWith(close)) {
       return text.slice(1, -1).trim();
@@ -38,7 +41,9 @@ function stripWrappingQuotes(text) {
   return text;
 }
 
-export function sanitize(raw, source = '') {
+export type SanitizeVerdict = { ok: true; text: string } | { ok: false; reason: string };
+
+export function sanitize(raw: unknown, source = ''): SanitizeVerdict {
   let text = String(raw ?? '');
   text = text.replace(FENCE_OPEN_RE, '').replace(FENCE_CLOSE_RE, '');
   text = stripWrappingQuotes(text.trim());
@@ -49,7 +54,7 @@ export function sanitize(raw, source = '') {
   }
   if (!text) return { ok: false, reason: 'empty output' };
   if (META_RE.test(text)) return { ok: false, reason: 'looks like meta-commentary' };
-  const visible = (s) => s.replace(/<[^<>]*>/g, '').replace(/\s+/g, '');
+  const visible = (s: string) => s.replace(/<[^<>]*>/g, '').replace(/\s+/g, '');
   const limit = Math.max(visible(source).length * 4, 40);
   if (visible(text).length > limit) {
     return { ok: false, reason: `output is ${text.length} chars, more than 4× the source` };
@@ -57,11 +62,20 @@ export function sanitize(raw, source = '') {
   return { ok: true, text };
 }
 
-function isRetryable(err) {
-  const status = err?.status;
+interface ProviderError {
+  status?: unknown;
+  code?: unknown;
+  message?: unknown;
+  headers?: { get?(name: string): string | null | undefined };
+  error?: { message?: unknown } | undefined;
+}
+
+function isRetryable(err: unknown): boolean {
+  const e = err as ProviderError | null | undefined;
+  const status = e?.status;
   if (status === 429 || (typeof status === 'number' && status >= 500 && status < 600)) return true;
   if (status !== undefined && status !== null) return false;
-  const code = err?.code;
+  const code = e?.code;
   if (
     typeof code === 'string' &&
     ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT'].includes(code)
@@ -71,8 +85,8 @@ function isRetryable(err) {
   return err instanceof OpenAI.APIConnectionError || err instanceof OpenAI.APIConnectionTimeoutError;
 }
 
-function retryAfterMs(err) {
-  const value = err?.headers?.get?.('retry-after');
+function retryAfterMs(err: unknown): number | null {
+  const value = (err as ProviderError | null | undefined)?.headers?.get?.('retry-after');
   if (!value) return null;
   const seconds = Number(value);
   if (Number.isFinite(seconds)) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
@@ -81,23 +95,25 @@ function retryAfterMs(err) {
   return Math.min(Math.max(date - Date.now(), 0), MAX_RETRY_AFTER_MS);
 }
 
-function toFailure(err) {
-  const status = err?.status;
-  const detail = err?.error?.message ?? err?.message ?? String(err);
+function toFailure(err: unknown): TranslationError {
+  const e = err as ProviderError | null | undefined;
+  const status = e?.status;
+  const detail = e?.error?.message ?? e?.message ?? String(err);
   return new TranslationError(
     `provider error${typeof status === 'number' ? ` (HTTP ${status})` : ''}: ${detail}`,
     { cause: err },
   );
 }
 
-export function createClient({ apiKey, baseUrl, timeout = 60_000 }) {
-  return new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0, timeout });
+export function createClient({ apiKey, baseUrl, timeout = 60_000 }: { apiKey: string | null; baseUrl: string; timeout?: number }): OpenAI {
+  return new OpenAI({ apiKey: apiKey ?? undefined, baseURL: baseUrl, maxRetries: 0, timeout });
 }
 
 // A bare client is treated as a one-endpoint pool, so both paths share the same code.
-function asPool(poolOrClient, model) {
-  if (poolOrClient && typeof poolOrClient.next === 'function') return poolOrClient;
-  const endpoint = { name: 'default', client: poolOrClient, model, dead: false, failures: 0 };
+function asPool(poolOrClient: Pool | CompletionClient, model: string | undefined): Pool {
+  if ('next' in poolOrClient && typeof poolOrClient.next === 'function') return poolOrClient;
+  const client = poolOrClient as CompletionClient;
+  const endpoint: PoolEntry = { name: 'default', client, model: model ?? '', dead: false, failures: 0 };
   return {
     endpoints: [endpoint],
     next: () => (endpoint.dead ? null : endpoint),
@@ -108,23 +124,50 @@ function asPool(poolOrClient, model) {
   };
 }
 
-const describeErr = (err) =>
-  err?.status !== undefined
-    ? `HTTP ${err.status}: ${err?.message ?? ''}`.trim()
-    : (err?.code ?? err?.message ?? 'error');
+const describeErr = (err: unknown): string => {
+  const e = err as ProviderError | null | undefined;
+  return e?.status !== undefined
+    ? `HTTP ${String(e.status)}: ${String(e.message ?? '')}`.trim()
+    : String(e?.code ?? e?.message ?? 'error');
+};
+
+export interface RetryInfo {
+  attempt: number;
+  delay: number;
+  err: unknown;
+  endpoint: string;
+}
+
+export interface TranslateCueOptions {
+  model?: string;
+  system: string;
+  user: string;
+  source: string;
+  delays?: number[];
+  onRetry?: (info: RetryInfo) => void;
+  onCall?: (info: { endpoint: string }) => void;
+  onWarn?: (message: string) => void;
+}
+
+export interface TranslateCueResult {
+  text: string;
+  usage: TokenUsage;
+  endpoint: string;
+  model: string;
+}
 
 export async function translateCue(
-  poolOrClient,
-  { model, system, user, source, delays = BASE_DELAYS_MS, onRetry, onCall, onWarn } = {},
-) {
+  poolOrClient: Pool | CompletionClient,
+  { model, system, user, source, delays = BASE_DELAYS_MS, onRetry, onCall, onWarn }: TranslateCueOptions,
+): Promise<TranslateCueResult> {
   const pool = asPool(poolOrClient, model);
   let nudged = false;
   let failures = 0;
-  let endpoint = null;
-  let lastFatal = null;
-  const usage = { in: 0, out: 0 };
+  let endpoint: PoolEntry | null = null;
+  let lastFatal: unknown = null;
+  const usage: TokenUsage = { in: 0, out: 0 };
 
-  const disable = (ep, reason) => {
+  const disable = (ep: PoolEntry, reason: string) => {
     pool.disable(ep.name);
     onWarn?.(`endpoint ${ep.name} отключён (${reason})`);
   };
@@ -141,18 +184,18 @@ export async function translateCue(
       }
     }
 
-    let raw;
+    let raw: string;
     try {
-      const messages = [
+      const messages: { role: 'system' | 'user'; content: string }[] = [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ];
       if (nudged) {
         messages.push({ role: 'user', content: 'Верни только текст реплики.' });
       }
-      const body = { model: endpoint.model ?? model, messages };
+      const body: Record<string, unknown> = { model: endpoint.model ?? model, messages };
       if (endpoint.extraBody) Object.assign(body, endpoint.extraBody);
-      const completion = await endpoint.client.chat.completions.create(body);
+      const completion = (await endpoint.client.chat.completions.create(body)) as CompletionLike;
       onCall?.({ endpoint: endpoint.name });
       const u = completion.usage;
       usage.in += u?.prompt_tokens ?? 0;

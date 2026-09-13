@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parse, serialize } from '../src/srt.js';
-import { sourceHash } from '../src/translate.js';
-import { ProgressStore, assemble, sidecarPath } from '../src/progress.js';
+import { parse, serialize } from '../src/srt.ts';
+import { sourceHash } from '../src/translate.ts';
+import { ProgressStore, assemble, sidecarPath } from '../src/progress.ts';
 
 function tempStore() {
   const dir = mkdtempSync(path.join(tmpdir(), 'subs-progress-'));
@@ -42,8 +42,8 @@ test('load: last write wins per cue index', () => {
 
   const map = new ProgressStore(store.path).load();
   assert.equal(map.size, 2);
-  assert.equal(map.get(1).ru, 'повторный');
-  assert.equal(map.get(2).ru, 'второй');
+  assert.equal(map.get(1)!.ru, 'повторный');
+  assert.equal(map.get(2)!.ru, 'второй');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -56,7 +56,7 @@ test('load: skips corrupt lines instead of failing', () => {
 
   const map = new ProgressStore(store.path).load();
   assert.equal(map.size, 1);
-  assert.equal(map.get(1).ru, 'ок');
+  assert.equal(map.get(1)!.ru, 'ок');
   rmSync(dir, { recursive: true, force: true });
 });
 

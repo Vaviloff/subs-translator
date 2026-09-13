@@ -3,24 +3,25 @@ import { test } from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadEndpoints, createPool } from '../src/endpoints.js';
-import { translateCue } from '../src/translate.js';
+import { loadEndpoints, createPool } from '../src/endpoints.ts';
+import { translateCue } from '../src/translate.ts';
+import type { RetryInfo } from '../src/translate.ts';
 
-function tempFile(content) {
+function tempFile(content?: string) {
   const dir = mkdtempSync(path.join(tmpdir(), 'subs-endpoints-'));
   const file = path.join(dir, 'endpoints.json');
   if (content !== undefined) writeFileSync(file, content);
   return { dir, file };
 }
 
-function stubClient(responses) {
-  const calls = [];
+function stubClient(responses: unknown[]) {
+  const calls: Record<string, unknown>[] = [];
   return {
     calls,
     chat: {
       completions: {
-        create: async (body) => {
-          calls.push(body);
+        create: async (body: unknown) => {
+          calls.push(body as Record<string, unknown>);
           const next = responses.shift();
           if (next === undefined) throw new Error('stub exhausted');
           if (typeof next === 'function') return next();
@@ -31,13 +32,21 @@ function stubClient(responses) {
   };
 }
 
-const ok = (text) => ({
+const fakeClient = {
+  chat: {
+    completions: {
+      create: async () => undefined,
+    },
+  },
+};
+
+const ok = (text: string) => ({
   choices: [{ message: { content: text } }],
   usage: { prompt_tokens: 10, completion_tokens: 2 },
 });
 
-const fail = (errProps) => () => {
-  throw Object.assign(new Error(errProps.code ?? 'boom'), errProps);
+const fail = (errProps: Record<string, unknown>) => () => {
+  throw Object.assign(new Error(String(errProps.code ?? 'boom')), errProps);
 };
 
 test('loadEndpoints: parses entries, resolves env: keys, fills defaults', () => {
@@ -74,18 +83,18 @@ test('loadEndpoints: rejects missing env var, missing fields, bad JSON, empty ar
 
 test('pool: strict round-robin order, disable skips, all-dead returns null', () => {
   const pool = createPool([
-    { name: 'a', model: 'm', client: {} },
-    { name: 'b', model: 'm', client: {} },
-    { name: 'c', model: 'm', client: {} },
+    { name: 'a', model: 'm', client: fakeClient },
+    { name: 'b', model: 'm', client: fakeClient },
+    { name: 'c', model: 'm', client: fakeClient },
   ]);
   assert.deepEqual(
-    [pool.next(), pool.next(), pool.next(), pool.next()].map((e) => e.name),
+    [pool.next(), pool.next(), pool.next(), pool.next()].map((e) => e!.name),
     ['a', 'b', 'c', 'a'],
   );
   pool.disable('b');
   assert.equal(pool.aliveCount(), 2);
   assert.deepEqual(
-    [pool.next(), pool.next(), pool.next()].map((e) => e.name),
+    [pool.next(), pool.next(), pool.next()].map((e) => e!.name),
     ['c', 'a', 'c'],
   );
   pool.disable('a');
@@ -117,7 +126,7 @@ test('translateCue: retryable failure rotates to the next endpoint, Retry-After 
     { name: 'a', model: 'ma', client: a },
     { name: 'b', model: 'mb', client: b },
   ]);
-  const retries = [];
+  const retries: RetryInfo[] = [];
   const res = await translateCue(pool, {
     system: 's',
     user: 'u',
@@ -140,7 +149,7 @@ test('translateCue: non-retryable error disables the endpoint and continues on t
     { name: 'a', model: 'ma', client: a },
     { name: 'b', model: 'mb', client: b },
   ]);
-  const warnings = [];
+  const warnings: string[] = [];
   const res = await translateCue(pool, {
     system: 's',
     user: 'u',
@@ -161,13 +170,13 @@ test('translateCue: five consecutive failures retire an endpoint', async () => {
     { name: 'a', model: 'ma', client: a },
     { name: 'b', model: 'mb', client: b },
   ]);
-  const warnings = [];
+  const warnings: string[] = [];
   const opts = {
     system: 's',
     user: 'u',
     source: 'src',
     delays: [0, 0, 0, 0, 0],
-    onWarn: (m) => warnings.push(m),
+    onWarn: (m: string) => warnings.push(m),
   };
   for (let i = 0; i < 6; i++) {
     const res = await translateCue(pool, opts);

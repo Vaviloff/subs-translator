@@ -3,11 +3,11 @@ import { test } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createContext, pendingCues, runTranslation } from '../src/run.js';
-import { ProgressStore, sidecarPath } from '../src/progress.js';
-import { sourceHash } from '../src/translate.js';
+import { createContext, pendingCues, runTranslation } from '../src/run.ts';
+import { ProgressStore, sidecarPath } from '../src/progress.ts';
+import { sourceHash } from '../src/translate.ts';
 
-function makeCues(n) {
+function makeCues(n: number) {
   return Array.from({ length: n }, (_, i) => ({
     index: i + 1,
     timing: `00:00:${String(i).padStart(2, '0')},000 --> 00:00:${String(i + 1).padStart(2, '0')},000`,
@@ -16,7 +16,7 @@ function makeCues(n) {
   }));
 }
 
-function tempStore() {
+function tempStore(): ProgressStore {
   const dir = mkdtempSync(path.join(tmpdir(), 'subs-run-'));
   return new ProgressStore(sidecarPath(path.join(dir, 'out.ru.srt')));
 }
@@ -25,13 +25,15 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
 };
 
-function makeTranslator({ gates = new Map(), failAt = null } = {}) {
-  const captured = new Map();
-  const openers = new Map();
+type Gate = ((value?: void) => void) | null;
+
+function makeTranslator({ gates = new Map<number, Gate>(), failAt = null }: { gates?: Map<number, Gate>; failAt?: number | null } = {}) {
+  const captured = new Map<number, string>();
+  const openers = new Map<number, Promise<void>>();
   for (const index of [...gates.keys()]) {
-    openers.set(index, new Promise((resolve) => gates.set(index, resolve)));
+    openers.set(index, new Promise<void>((resolve) => gates.set(index, resolve)));
   }
-  const translate = async ({ cue, user }) => {
+  const translate = async ({ cue, user }: { cue: { index: number }; user: string }) => {
     captured.set(cue.index, user);
     if (failAt === cue.index) throw new Error('boom');
     await (openers.get(cue.index) ?? Promise.resolve());
@@ -40,7 +42,7 @@ function makeTranslator({ gates = new Map(), failAt = null } = {}) {
   return {
     captured,
     translate,
-    open: (index) => {
+    open: (index: number) => {
       const resolve = gates.get(index);
       gates.delete(index);
       resolve?.();
@@ -50,7 +52,7 @@ function makeTranslator({ gates = new Map(), failAt = null } = {}) {
 
 test('concurrency: context holds finished predecessors only, never in-flight ones', async () => {
   const cues = makeCues(9);
-  const gates = new Map(cues.map((c) => [c.index, null]));
+  const gates = new Map<number, Gate>(cues.map((c) => [c.index, null]));
   const { captured, translate, open } = makeTranslator({ gates });
   const store = tempStore();
 
@@ -65,21 +67,21 @@ test('concurrency: context holds finished predecessors only, never in-flight one
 
   // three calls in flight, none of them may carry Russian context
   assert.deepEqual([...captured.keys()].sort(), [1, 2, 3]);
-  assert.ok(!captured.get(2).includes('ЧТО УЖЕ ПЕРЕВЕДЕНО'));
+  assert.ok(!captured.get(2)!.includes('ЧТО УЖЕ ПЕРЕВЕДЕНО'));
 
   open(1);
   await flush();
   assert.ok(captured.has(4), 'cue 4 should start after cue 1 lands');
-  assert.ok(captured.get(4).includes('[1] line-1 → ru-1'), 'finished cue 1 is context');
-  assert.ok(!captured.get(4).includes('[2]'), 'in-flight cue 2 must not appear');
+  assert.ok(captured.get(4)!.includes('[1] line-1 → ru-1'), 'finished cue 1 is context');
+  assert.ok(!captured.get(4)!.includes('[2]'), 'in-flight cue 2 must not appear');
 
   open(2);
   await flush();
   assert.ok(captured.has(5));
-  assert.ok(captured.get(5).includes('[1] line-1 → ru-1'));
-  assert.ok(captured.get(5).includes('[2] line-2 → ru-2'));
-  assert.ok(!captured.get(5).includes('[3]'), 'cue 3 still in flight');
-  assert.ok(!captured.get(5).includes('[4]'), 'cue 4 still in flight');
+  assert.ok(captured.get(5)!.includes('[1] line-1 → ru-1'));
+  assert.ok(captured.get(5)!.includes('[2] line-2 → ru-2'));
+  assert.ok(!captured.get(5)!.includes('[3]'), 'cue 3 still in flight');
+  assert.ok(!captured.get(5)!.includes('[4]'), 'cue 4 still in flight');
 
   for (let i = 3; i <= 9; i++) open(i);
   const result = await run;
@@ -93,12 +95,15 @@ test('concurrency: context holds finished predecessors only, never in-flight one
 
 test('failure: no new cues start, in-flight results still land, error carries cue index', async () => {
   const cues = makeCues(6);
-  const gates = new Map([[2, null]]);
+  const gates = new Map<number, Gate>([[2, null]]);
   const { translate, open } = makeTranslator({ gates, failAt: 1 });
   const store = tempStore();
 
   const run = runTranslation(cues, { cues, store, model: 'm', translate, concurrency: 2 });
-  const rejection = assert.rejects(run, (err) => err.message === 'boom' && err.cueIndex === 1);
+  const rejection = assert.rejects(run, (err: unknown) => {
+    const e = err as Error & { cueIndex?: number };
+    return e.message === 'boom' && e.cueIndex === 1;
+  });
   await flush();
 
   open(2);
@@ -128,8 +133,8 @@ test('sequential run with resume skips matching entries but keeps them as contex
   const store = tempStore();
   store.record({ i: 1, h: sourceHash('line-1'), src: 'line-1', ru: 'ru-1' });
 
-  const calls = [];
-  const translate = async ({ cue, user }) => {
+  const calls: number[] = [];
+  const translate = async ({ cue }: { cue: { index: number } }) => {
     calls.push(cue.index);
     return { text: `ru-${cue.index}`, usage: { in: 10, out: 2 } };
   };

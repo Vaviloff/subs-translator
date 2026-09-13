@@ -169,9 +169,18 @@ Names and terms:
 
 ## Разработка
 
+Код написан на TypeScript и исполняется Node.js ≥ 24 напрямую (native type stripping) —
+сборка не нужна ни для разработки, ни для запуска.
+
 ```sh
-npm test
+npm run typecheck   # tsc --noEmit
+npm test            # node --test, подхватывает test/*.test.ts
+npm run check       # и то и другое
 ```
 
 Тесты — `node:test`, без внешних зависимостей: round-trip SRT, cp1251, переносы, resume/assembly,
 санитайзер и логика ретраев (со стабом вместо API).
+
+Сборка в самодостаточный бинарник (например, для NAS без Node): бандлить esbuild'ом
+(`esbuild bin/subs-translate.ts --bundle --platform=node`) и дальше — Node SEA или
+`bun build --compile` на получившемся файле.

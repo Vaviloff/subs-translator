@@ -3,13 +3,15 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
-import { parse, serialize } from '../src/srt.js';
-import { defaultOutputPath, discoverAbout, resolveConfig } from '../src/config.js';
-import { buildSystem, buildUser } from '../src/prompt.js';
-import { createClient, translateCue } from '../src/translate.js';
-import { createPool, loadEndpoints } from '../src/endpoints.js';
-import { ProgressStore, assemble, sidecarPath } from '../src/progress.js';
-import { createContext, pendingCues, runTranslation } from '../src/run.js';
+import { parse, serialize } from '../src/srt.ts';
+import { defaultOutputPath, discoverAbout, resolveConfig } from '../src/config.ts';
+import { buildSystem, buildUser } from '../src/prompt.ts';
+import { createClient, translateCue } from '../src/translate.ts';
+import type { RetryInfo } from '../src/translate.ts';
+import { createPool, loadEndpoints } from '../src/endpoints.ts';
+import { ProgressStore, assemble, sidecarPath } from '../src/progress.ts';
+import { createContext, pendingCues, runTranslation } from '../src/run.ts';
+import type { Pool } from '../src/types.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
 
@@ -39,12 +41,16 @@ const USAGE = `subs-translate — переводит .srt реплика за р
       --dry-run               показать промпт первой реплики и выйти, без вызовов
   -q, --quiet                 без прогресса на stderr`;
 
-function die(message, code = 2) {
+function die(message: string, code = 2): never {
   console.error(`subs-translate: ${message}`);
   process.exit(code);
 }
 
-function intOption(values, name, { min = 0 } = {}) {
+function intOption(
+  values: Record<string, string | boolean | undefined>,
+  name: string,
+  { min = 0 }: { min?: number } = {},
+): number | undefined {
   const raw = values[name];
   if (raw === undefined) return undefined;
   const n = Number(raw);
@@ -54,7 +60,7 @@ function intOption(values, name, { min = 0 } = {}) {
   return n;
 }
 
-function floatOption(values, name) {
+function floatOption(values: Record<string, string | boolean | undefined>, name: string): number | undefined {
   const raw = values[name];
   if (raw === undefined) return undefined;
   const n = Number(raw);
@@ -64,7 +70,7 @@ function floatOption(values, name) {
   return n;
 }
 
-function fmtDuration(ms) {
+function fmtDuration(ms: number): string {
   const total = Math.floor(ms / 1000);
   const s = String(total % 60).padStart(2, '0');
   const m = Math.floor(total / 60);
@@ -72,28 +78,27 @@ function fmtDuration(ms) {
   return h > 0 ? `${h}:${String(m % 60).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
 }
 
-function fmtTokens(n) {
+function fmtTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
-function parseRange(raw) {
+function parseRange(raw: string | undefined): [number, number] {
   const m = /^(\d+)-(\d+)$/.exec(raw ?? '');
   if (!m) die(`--range expects A-B, got ${JSON.stringify(raw)}`);
   return [Number(m[1]), Number(m[2])];
 }
 
-function costLine(tokens, priceIn, priceOut) {
+function costLine(tokens: { in: number; out: number }, priceIn: number | undefined, priceOut: number | undefined): string {
   if (priceIn === undefined && priceOut === undefined) return '';
   const usd = (tokens.in / 1e6) * (priceIn ?? 0) + (tokens.out / 1e6) * (priceOut ?? 0);
   return ` · $${usd.toFixed(2)}`;
 }
 
-async function main() {
-  let parsed;
+function parseCliArgs() {
   try {
-    parsed = parseArgs({
+    return parseArgs({
       allowPositionals: true,
       strict: true,
       options: {
@@ -121,8 +126,12 @@ async function main() {
       },
     });
   } catch (err) {
-    die(`${err.message}\n\n${USAGE}`);
+    die(`${(err as Error).message}\n\n${USAGE}`);
   }
+}
+
+async function main(): Promise<number> {
+  const parsed = parseCliArgs();
   const values = parsed.values;
   if (parsed.positionals.length !== 1) {
     die(`expected exactly one input .srt file\n\n${USAGE}`);
@@ -149,12 +158,12 @@ async function main() {
     model: values.model,
   });
 
-  let pool = null;
+  let pool: Pool | null = null;
   if (values.endpoints !== undefined) {
     try {
       pool = createPool(loadEndpoints(values.endpoints));
     } catch (err) {
-      die(err.message);
+      die((err as Error).message);
     }
     if (values['api-key'] !== undefined || values['base-url'] !== undefined || values.model !== undefined) {
       console.error('subs-translate: --endpoints задан — --model/--base-url/--api-key игнорируются');
@@ -183,11 +192,11 @@ async function main() {
   }
   if (!selected.length) die('no cues fall into the requested range');
 
-  let about = null;
+  let about: string | null = null;
   try {
     about = discoverAbout(inputPath, { about: values.about, aboutFile: values['about-file'] });
   } catch (err) {
-    die(err.message);
+    die((err as Error).message);
   }
 
   const system = buildSystem({
@@ -231,7 +240,7 @@ async function main() {
   let lastPaint = 0;
   let progressLen = 0;
 
-  const paint = (force = false) => {
+  const paint = (force = false): void => {
     if (quiet || !process.stderr.isTTY) return;
     const now = Date.now();
     if (!force && now - lastPaint < 250) return;
@@ -247,29 +256,30 @@ async function main() {
     process.stderr.write(`\r${line}    `);
   };
 
-  const clearProgress = () => {
+  const clearProgress = (): void => {
     if (progressLen > 0) {
       process.stderr.write('\r' + ' '.repeat(progressLen) + '\r');
       progressLen = 0;
     }
   };
 
-  const noteRetry = ({ attempt, delay, err, endpoint }) => {
+  const noteRetry = ({ attempt, delay, err, endpoint }: RetryInfo): void => {
     if (quiet) return;
-    const why = err?.status !== undefined ? `HTTP ${err.status}` : (err?.code ?? 'network error');
+    const e = err as { status?: unknown; code?: unknown };
+    const why = e?.status !== undefined ? `HTTP ${String(e.status)}` : String(e?.code ?? 'network error');
     clearProgress();
     console.error(`повтор ${attempt}/5 через ${Math.round(delay / 1000)} с (${why}${endpoint ? `, ${endpoint}` : ''})`);
     paint(true);
   };
 
-  const warnEndpoint = (message) => {
+  const warnEndpoint = (message: string): void => {
     if (quiet) return;
     clearProgress();
     console.error(`⚠ ${message}`);
     paint(true);
   };
 
-  const translate = async ({ user, source }) =>
+  const translate = async ({ user, source }: { user: string; source: string }) =>
     translateCue(client, {
       model: config.model,
       system,
@@ -279,14 +289,14 @@ async function main() {
       onWarn: warnEndpoint,
     });
 
-  const resumeHint = () => {
+  const resumeHint = (): void => {
     console.error(`Прогресс сохранён в ${sidecar}`);
     const rangePart = values.range !== undefined ? ` --range ${values.range}` : '';
     console.error(
       `Продолжить: subs-translate ${path.relative(process.cwd(), inputPath) || inputPath} --resume${rangePart}`,
     );
   };
-  const onInterrupt = (signal) => {
+  const onInterrupt = (signal: string): void => {
     store.close();
     console.error(`\nПрервано (${signal}) после ${live.processed}/${total} реплик`);
     resumeHint();
@@ -317,7 +327,8 @@ async function main() {
     store.close();
     paint(true);
     clearProgress();
-    console.error(`\nОшибка на реплике [${err.cueIndex ?? '?'}]: ${err.message}`);
+    const e = err as Error & { cueIndex?: number };
+    console.error(`\nОшибка на реплике [${e.cueIndex ?? '?'}]: ${e.message}`);
     resumeHint();
     return 1;
   }
@@ -347,6 +358,6 @@ async function main() {
 main()
   .then((code) => process.exit(code))
   .catch((err) => {
-    console.error(`subs-translate: ${err?.stack ?? err}`);
+    console.error(`subs-translate: ${(err as Error)?.stack ?? err}`);
     process.exit(1);
   });

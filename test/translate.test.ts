@@ -1,15 +1,19 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sanitize, sourceHash, translateCue, TranslationError } from '../src/translate.js';
+import { sanitize, sourceHash, translateCue, TranslationError } from '../src/translate.ts';
 
-function stubClient(responses) {
-  const calls = [];
+interface StubCall {
+  messages: { content: string }[];
+}
+
+function stubClient(responses: unknown[]) {
+  const calls: StubCall[] = [];
   return {
     calls,
     chat: {
       completions: {
-        create: async (body) => {
-          calls.push(body);
+        create: async (body: unknown) => {
+          calls.push(body as StubCall);
           const next = responses.shift();
           if (typeof next === 'function') return next();
           return next;
@@ -19,11 +23,17 @@ function stubClient(responses) {
   };
 }
 
-function completion(text) {
+function completion(text: string) {
   return {
     choices: [{ message: { content: text, reasoning_content: 'internal chatter' } }],
     usage: { prompt_tokens: 10, completion_tokens: 5 },
   };
+}
+
+function sanitizedText(raw: string, source: string): string {
+  const verdict = sanitize(raw, source);
+  if (!verdict.ok) assert.fail(`expected ok, got: ${verdict.reason}`);
+  return verdict.text;
 }
 
 test('sourceHash: 12 hex chars, stable', () => {
@@ -41,10 +51,10 @@ test('sanitize: plain text passes through', () => {
 });
 
 test('sanitize: strips code fences, wrapping quotes and labels', () => {
-  assert.equal(sanitize('```\nПривет\n```', 'Hi').text, 'Привет');
-  assert.equal(sanitize('«Привет»', 'Hi').text, 'Привет');
-  assert.equal(sanitize('**Translation:** Привет', 'Hi').text, 'Привет');
-  assert.equal(sanitize('Перевод: Привет', 'Hi').text, 'Привет');
+  assert.equal(sanitizedText('```\nПривет\n```', 'Hi'), 'Привет');
+  assert.equal(sanitizedText('«Привет»', 'Hi'), 'Привет');
+  assert.equal(sanitizedText('**Translation:** Привет', 'Hi'), 'Привет');
+  assert.equal(sanitizedText('Перевод: Привет', 'Hi'), 'Привет');
 });
 
 test('sanitize: rejects empty, meta and overlong output', () => {
@@ -83,7 +93,7 @@ test('translateCue: rejected output triggers exactly one stricter retry', async 
   });
   assert.equal(text, 'Привет');
   assert.equal(client.calls.length, 2);
-  assert.equal(client.calls[1].messages.at(-1).content, 'Верни только текст реплики.');
+  assert.equal(client.calls[1].messages.at(-1)!.content, 'Верни только текст реплики.');
 });
 
 test('translateCue: rejected output after the nudge fails hard', async () => {
