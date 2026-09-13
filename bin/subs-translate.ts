@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { parse, serialize } from '../src/srt.ts';
+import { cleanCues } from '../src/clean.ts';
 import { defaultOutputPath, discoverAbout, resolveConfig } from '../src/config.ts';
 import { buildSystem, buildUser } from '../src/prompt.ts';
 import { createClient, translateCue } from '../src/translate.ts';
@@ -39,7 +40,11 @@ const USAGE = `subs-translate — переводит .srt реплика за р
       --price-out <usd>       цена 1M output-токенов
       --resume                переиспользовать готовые записи из sidecar-файла
       --dry-run               показать промпт первой реплики и выйти, без вызовов
-  -q, --quiet                 без прогресса на stderr`;
+  -q, --quiet                 без прогресса на stderr
+
+Перед переводом вход чистится: удаляются SDH-реплики «(...)»/«[...]»
+и сливаются идущие подряд одинаковые реплики. Номера реплик сохраняются,
+поэтому --range работает по нумерации исходного файла.`;
 
 function die(message: string, code = 2): never {
   console.error(`subs-translate: ${message}`);
@@ -170,8 +175,16 @@ async function main(): Promise<number> {
     }
   }
 
-  const { cues } = parse(readFileSync(inputPath));
+  const rawCues = parse(readFileSync(inputPath)).cues;
+  const { cues, stats: cleaned } = cleanCues(rawCues);
   if (!cues.length) die('no subtitle cues found in the input');
+  if (!quiet && (cleaned.sdhCues || cleaned.sdhLines || cleaned.merged)) {
+    const parts: string[] = [];
+    if (cleaned.sdhCues) parts.push(`−${cleaned.sdhCues} SDH-реплик`);
+    if (cleaned.sdhLines) parts.push(`−${cleaned.sdhLines} SDH-строк`);
+    if (cleaned.merged) parts.push(`слито ${cleaned.merged} дубликатов`);
+    console.error(`Чистка: ${parts.join(', ')} (${rawCues.length} → ${cues.length} реплик)`);
+  }
 
   const sidecar = sidecarPath(outPath);
   const store = new ProgressStore(sidecar);
