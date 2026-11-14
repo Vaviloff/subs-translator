@@ -27,6 +27,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@inquirer/prompts": "^8.7.5",
     "openai": "^5.23.2"
   },
   "devDependencies": {

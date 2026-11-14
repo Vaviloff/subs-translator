@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { aboutCandidates, discoverAbout } from '../src/config.ts';
+import { aboutCandidates, discoverAbout, videoOutputPath } from '../src/config.ts';
+import { audioBasePath } from '../src/stt.ts';
+import { extractedPath } from '../src/video.ts';
 
 test('aboutCandidates: same name as the input, .txt then .md', () => {
   assert.deepEqual(aboutCandidates('/films/movie.mkv'), ['/films/movie.txt', '/films/movie.md']);
@@ -24,4 +26,11 @@ test('discoverAbout: picks movie.txt over movie.md, ignores movie.about.md', () 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('videoOutputPath: translation goes next to the original input', () => {
+  assert.equal(videoOutputPath('/films/movie.srt', '/films/movie.srt'), '/films/movie.ru.srt');
+  const video = '/films/movie.mkv';
+  assert.equal(videoOutputPath(video, extractedPath(video, 0, 'eng')), '/films/movie.track0.eng.ru.srt');
+  assert.equal(videoOutputPath(video, `${audioBasePath(video, 1)}.srt`), '/films/movie.audio1.ru.srt');
 });

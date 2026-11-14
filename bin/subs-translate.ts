@@ -5,7 +5,7 @@ import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { parse, serialize } from '../src/srt.ts';
 import { cleanCues } from '../src/clean.ts';
-import { defaultOutputPath, discoverAbout, resolveConfig, workDir } from '../src/config.ts';
+import { discoverAbout, resolveConfig, videoOutputPath, workDir } from '../src/config.ts';
 import { buildSystem, buildUser } from '../src/prompt.ts';
 import { createClient, translateCue } from '../src/translate.ts';
 import type { RetryInfo } from '../src/translate.ts';
@@ -16,14 +16,17 @@ import { extractSubtitle, extractedPath, formatAudioTrackList, formatTrackList, 
 import type { AudioStream, SubStream } from '../src/video.ts';
 import { assertSttConfig, resolveSttConfig, transcribeAudioTrack } from '../src/stt.ts';
 import type { Pool } from '../src/types.ts';
+import { runWizard } from '../src/wizard.ts';
 import { displayPath, formatCommand, programWords, quoteArg } from '../src/launch.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
 
 Использование:
   subs-translate <input.srt | video> [options]
+  subs-translate                    интерактивный режим: вопросы с выбором стрелками
 
 Опции:
+  -i, --interactive           интерактивный режим; уже заданные флаги не спрашиваются
   -o, --out <path>            выходной файл (по умолчанию <input>.ru.srt)
       --about <text>          синопсис текстом
       --about-file <path>     синопсис из файла (по умолчанию <input>.txt или <input>.md, если есть)
@@ -147,6 +150,7 @@ function parseCliArgs() {
         resume: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
+        interactive: { type: 'boolean', short: 'i' },
       },
     });
   } catch (err) {
@@ -156,12 +160,34 @@ function parseCliArgs() {
 
 async function main(): Promise<number> {
   const parsed = parseCliArgs();
-  const values = parsed.values;
-  if (parsed.positionals.length !== 1) {
+  let values = parsed.values;
+  let positionals = parsed.positionals;
+  const noArgs = process.argv.length <= 2;
+  if (values.interactive || noArgs) {
+    const tty = process.stdin.isTTY && process.stdout.isTTY;
+    if (values.interactive && !tty) die('интерактивный режим требует терминал');
+    if (tty) {
+      if (positionals.length > 1) die(`expected at most one input file with --interactive\n\n${USAGE}`);
+      let answers;
+      try {
+        answers = await runWizard({ input: positionals[0], values });
+      } catch (err) {
+        if ((err as Error).name === 'ExitPromptError') {
+          console.error('Отменено');
+          return 130;
+        }
+        die((err as Error).message);
+      }
+      if (!answers) return 0;
+      values = answers.values;
+      positionals = [answers.input];
+    }
+  }
+  if (positionals.length !== 1) {
     die(`expected exactly one input file: an .srt or a video\n\n${USAGE}`);
   }
 
-  const inputPath = path.resolve(parsed.positionals[0]);
+  const inputPath = path.resolve(positionals[0]);
   if (!existsSync(inputPath)) die(`input file not found: ${inputPath}`);
   const subTrack = intOption(values, 'sub-track');
   const audioTrack = intOption(values, 'audio-track');
@@ -280,9 +306,7 @@ async function main(): Promise<number> {
     console.error(`Рабочие файлы: ${workDir(inputPath)}`);
   }
   // извлечённый/распознанный вход лежит во временной папке — перевод кладём рядом с видео
-  const outPath = path.resolve(
-    values.out ?? path.join(path.dirname(inputPath), path.basename(defaultOutputPath(effectiveInput))),
-  );
+  const outPath = path.resolve(values.out ?? videoOutputPath(inputPath, effectiveInput));
   if (outPath === inputPath || outPath === effectiveInput) {
     die('refusing to overwrite the input file: use -o <path>');
   }

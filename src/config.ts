@@ -63,6 +63,11 @@ export function defaultOutputPath(inputPath: string): string {
   return `${base}.ru.srt`;
 }
 
+/** extracted/transcribed input lives in the temp work dir; the translation goes next to the original input */
+export function videoOutputPath(inputPath: string, effectiveInput: string): string {
+  return path.join(path.dirname(inputPath), path.basename(defaultOutputPath(effectiveInput)));
+}
+
 /** per-folder scratch dir in the OS temp: <tmp>/subs-translate/<folder>-<sha1(abs folder)[:10]> */
 export function workDir(filePath: string): string {
   const dir = path.dirname(path.resolve(filePath));
