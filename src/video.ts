@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import { workDir } from './config.ts';
 
 export interface SubStream {
   /** index among subtitle streams, as consumed by `ffmpeg -map 0:s:<n>` */
@@ -219,8 +220,7 @@ export function sliceAudioChunk(
 }
 
 export function extractedPath(videoPath: string, track: number, language?: string | null): string {
-  const ext = path.extname(videoPath);
-  const base = ext ? videoPath.slice(0, -ext.length) : videoPath;
+  const base = path.join(workDir(videoPath), path.basename(videoPath, path.extname(videoPath)));
   const lang = language?.trim().toLowerCase() ?? '';
   const tag = lang && !JUNK_LANGS.has(lang) && /^[a-z]{2,3}(?:-[a-z0-9]+)*$/.test(lang) ? `.${lang}` : '';
   return `${base}.track${track}${tag}.srt`;

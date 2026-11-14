@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 export const DEFAULT_BASE_URL = 'https://api.paretoinference.com/v1';
@@ -53,4 +55,11 @@ export function defaultOutputPath(inputPath: string): string {
   const ext = path.extname(inputPath);
   const base = ext ? inputPath.slice(0, -ext.length) : inputPath;
   return `${base}.ru.srt`;
+}
+
+/** per-folder scratch dir in the OS temp: <tmp>/subs-translate/<folder>-<sha1(abs folder)[:10]> */
+export function workDir(filePath: string): string {
+  const dir = path.dirname(path.resolve(filePath));
+  const hash = createHash('sha1').update(dir).digest('hex').slice(0, 10);
+  return path.join(tmpdir(), 'subs-translate', `${path.basename(dir) || 'root'}-${hash}`);
 }

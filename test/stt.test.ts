@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import path from 'node:path';
+import { workDir } from '../src/config.ts';
 import {
   audioBasePath,
   mergeSegmentChunks,
@@ -235,10 +237,11 @@ test('segmentsToCues: numbered cues with SRT timing', () => {
   assert.equal(t?.endMs, 4000);
 });
 
-test('audioBasePath: video extension stripped, track number embedded', () => {
-  assert.equal(audioBasePath('/a/movie.mkv', 0), '/a/movie.audio0');
-  assert.equal(audioBasePath('/a/Movie [id].mp4', 1), '/a/Movie [id].audio1');
-  assert.equal(audioBasePath('/a/movie', 2), '/a/movie.audio2');
+test('audioBasePath: in the temp work dir, video extension stripped, track number embedded', () => {
+  const dir = workDir('/a/movie.mkv');
+  assert.equal(audioBasePath('/a/movie.mkv', 0), path.join(dir, 'movie.audio0'));
+  assert.equal(audioBasePath('/a/Movie [id].mp4', 1), path.join(dir, 'Movie [id].audio1'));
+  assert.equal(audioBasePath('/a/movie', 2), path.join(dir, 'movie.audio2'));
 });
 
 test('resolveSttConfig: flags beat env, empty env values count as unset, GROQ_API_TOKEN is the key fallback', () => {

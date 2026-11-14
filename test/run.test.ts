@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createContext, pendingCues, runTranslation } from '../src/run.ts';
-import { ProgressStore, sidecarPath } from '../src/progress.ts';
+import { ProgressStore } from '../src/progress.ts';
 import { sourceHash } from '../src/translate.ts';
 
 function makeCues(n: number) {
@@ -18,7 +18,7 @@ function makeCues(n: number) {
 
 function tempStore(): ProgressStore {
   const dir = mkdtempSync(path.join(tmpdir(), 'subs-run-'));
-  return new ProgressStore(sidecarPath(path.join(dir, 'out.ru.srt')));
+  return new ProgressStore(path.join(dir, 'out.ru.srt.progress.jsonl'));
 }
 
 const flush = async () => {

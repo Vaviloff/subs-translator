@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { parse, serialize } from '../src/srt.ts';
 import { cleanCues } from '../src/clean.ts';
-import { defaultOutputPath, discoverAbout, resolveConfig } from '../src/config.ts';
+import { defaultOutputPath, discoverAbout, resolveConfig, workDir } from '../src/config.ts';
 import { buildSystem, buildUser } from '../src/prompt.ts';
 import { createClient, translateCue } from '../src/translate.ts';
 import type { RetryInfo } from '../src/translate.ts';
@@ -199,6 +199,7 @@ async function main(): Promise<number> {
     }
     const extracted = extractedPath(inputPath, stream.track, stream.language);
     try {
+      mkdirSync(path.dirname(extracted), { recursive: true });
       writeFileSync(extracted, data);
     } catch (err) {
       die(`cannot write ${extracted}: ${(err as Error).message}`);
@@ -274,7 +275,13 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  const outPath = path.resolve(values.out ?? defaultOutputPath(effectiveInput));
+  if (effectiveInput !== inputPath && !quiet) {
+    console.error(`Рабочие файлы: ${workDir(inputPath)}`);
+  }
+  // извлечённый/распознанный вход лежит во временной папке — перевод кладём рядом с видео
+  const outPath = path.resolve(
+    values.out ?? path.join(path.dirname(inputPath), path.basename(defaultOutputPath(effectiveInput))),
+  );
   if (outPath === inputPath || outPath === effectiveInput) {
     die('refusing to overwrite the input file: use -o <path>');
   }
@@ -439,9 +446,12 @@ async function main(): Promise<number> {
 
   const resumeHint = (): void => {
     console.error(`Прогресс сохранён в ${sidecar}`);
+    const trackPart =
+      subTrack !== undefined ? ` --sub-track ${subTrack}` : audioTrack !== undefined ? ` --audio-track ${audioTrack}` : '';
     const rangePart = values.range !== undefined ? ` --range ${values.range}` : '';
+    const outPart = values.out !== undefined ? ` -o ${values.out}` : '';
     console.error(
-      `Продолжить: subs-translate ${path.relative(process.cwd(), effectiveInput) || effectiveInput} --resume${rangePart}`,
+      `Продолжить: subs-translate ${path.relative(process.cwd(), inputPath) || inputPath}${trackPart} --resume${rangePart}${outPart}`,
     );
   };
   const onInterrupt = (signal: string): void => {

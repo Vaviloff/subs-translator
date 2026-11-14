@@ -1,10 +1,12 @@
-import { closeSync, existsSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import path from 'node:path';
+import { workDir } from './config.ts';
 import { sourceHash } from './translate.ts';
 import { wrap } from './srt.ts';
 import type { Cue, ProgressEntry } from './types.ts';
 
 export function sidecarPath(outputPath: string): string {
-  return `${outputPath}.progress.jsonl`;
+  return path.join(workDir(outputPath), `${path.basename(outputPath)}.progress.jsonl`);
 }
 
 export class ProgressStore {
@@ -35,7 +37,10 @@ export class ProgressStore {
   }
 
   record(entry: ProgressEntry): void {
-    if (this.#fd === null) this.#fd = openSync(this.path, 'a');
+    if (this.#fd === null) {
+      mkdirSync(path.dirname(this.path), { recursive: true });
+      this.#fd = openSync(this.path, 'a');
+    }
     writeSync(this.#fd, JSON.stringify(entry) + '\n');
     this.map.set(entry.i, entry);
   }

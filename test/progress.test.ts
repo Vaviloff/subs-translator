@@ -6,10 +6,11 @@ import path from 'node:path';
 import { parse, serialize } from '../src/srt.ts';
 import { sourceHash } from '../src/translate.ts';
 import { ProgressStore, assemble, sidecarPath } from '../src/progress.ts';
+import { workDir } from '../src/config.ts';
 
 function tempStore() {
   const dir = mkdtempSync(path.join(tmpdir(), 'subs-progress-'));
-  const store = new ProgressStore(sidecarPath(path.join(dir, 'out.ru.srt')));
+  const store = new ProgressStore(path.join(dir, 'out.ru.srt.progress.jsonl'));
   return { dir, store };
 }
 
@@ -92,4 +93,26 @@ test('assemble: hash mismatch or missing entry falls back to the original', () =
   const stale = new Map([[1, { i: 1, h: 'deadbeefdead', ru: 'Устаревший перевод.' }]]);
   assert.deepEqual(assemble(cues, stale)[0].lines, ['Hello.']);
   assert.deepEqual(assemble(cues, new Map())[0].lines, ['Hello.']);
+});
+
+test('workDir: deterministic per-folder dir under the OS temp', () => {
+  const dir = workDir('/films/a/movie.mkv');
+  assert.equal(path.dirname(dir), path.join(tmpdir(), 'subs-translate'));
+  assert.match(path.basename(dir), /^a-[0-9a-f]{10}$/);
+  assert.equal(workDir('/films/a/other.srt'), dir);
+  assert.notEqual(workDir('/films/b/movie.mkv'), dir);
+  assert.notEqual(workDir('/other/a/movie.mkv'), dir);
+});
+
+test('sidecarPath: lives in the work dir of the output, named after it', () => {
+  assert.equal(sidecarPath('/films/a/movie.ru.srt'), path.join(workDir('/films/a/movie.ru.srt'), 'movie.ru.srt.progress.jsonl'));
+});
+
+test('record creates the missing sidecar directory', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'subs-progress-'));
+  const store = new ProgressStore(path.join(dir, 'nested', 'out.ru.srt.progress.jsonl'));
+  store.record({ i: 1, h: 'x', ru: 'y' });
+  store.close();
+  assert.equal(new ProgressStore(store.path).load().size, 1);
+  rmSync(dir, { recursive: true, force: true });
 });
