@@ -16,6 +16,7 @@ import { extractSubtitle, extractedPath, formatAudioTrackList, formatTrackList, 
 import type { AudioStream, SubStream } from '../src/video.ts';
 import { assertSttConfig, resolveSttConfig, transcribeAudioTrack } from '../src/stt.ts';
 import type { Pool } from '../src/types.ts';
+import { displayPath, formatCommand, programWords, quoteArg } from '../src/launch.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
 
@@ -266,10 +267,10 @@ async function main(): Promise<number> {
     }
     console.log(`\nАудиодорожки в ${path.basename(inputPath)}:`);
     for (const line of formatAudioTrackList(audioStreams)) console.log(`  ${line}`);
-    const arg = path.relative(process.cwd(), inputPath) || inputPath;
-    console.log(`\nПеревести дорожку субтитров: subs-translate ${arg} --sub-track <номер>`);
+    const cmd = [...programWords(), displayPath(inputPath)].map(quoteArg).join(' ');
+    console.log(`\nПеревести дорожку субтитров: ${cmd} --sub-track <номер>`);
     console.log(
-      `Транскрибировать речь:      subs-translate ${arg} --audio-track <номер>` +
+      `Транскрибировать речь:      ${cmd} --audio-track <номер>` +
         `  (нужны STT_MODEL и STT_API_KEY/GROQ_API_TOKEN в .env)`,
     );
     return 0;
@@ -446,13 +447,13 @@ async function main(): Promise<number> {
 
   const resumeHint = (): void => {
     console.error(`Прогресс сохранён в ${sidecar}`);
-    const trackPart =
-      subTrack !== undefined ? ` --sub-track ${subTrack}` : audioTrack !== undefined ? ` --audio-track ${audioTrack}` : '';
-    const rangePart = values.range !== undefined ? ` --range ${values.range}` : '';
-    const outPart = values.out !== undefined ? ` -o ${values.out}` : '';
-    console.error(
-      `Продолжить: subs-translate ${path.relative(process.cwd(), inputPath) || inputPath}${trackPart} --resume${rangePart}${outPart}`,
-    );
+    const argv = [displayPath(inputPath)];
+    if (subTrack !== undefined) argv.push('--sub-track', String(subTrack));
+    else if (audioTrack !== undefined) argv.push('--audio-track', String(audioTrack));
+    argv.push('--resume');
+    if (values.range !== undefined) argv.push('--range', values.range);
+    if (values.out !== undefined) argv.push('-o', values.out);
+    console.error(`Продолжить: ${formatCommand(argv)}`);
   };
   const onInterrupt = (signal: string): void => {
     store.close();
