@@ -33,6 +33,12 @@ export function resolveConfig({
   };
 }
 
+/** synopsis files next to the input, in lookup order: movie.mkv → movie.txt, movie.md */
+export function aboutCandidates(inputPath: string): string[] {
+  const base = inputPath.replace(/\.[^./\\]+$/, '');
+  return [`${base}.txt`, `${base}.md`];
+}
+
 export function discoverAbout(
   inputPath: string,
   { about, aboutFile }: { about?: string; aboutFile?: string } = {},
@@ -44,8 +50,8 @@ export function discoverAbout(
     }
     return readFileSync(aboutFile, 'utf8').trim() || null;
   }
-  const candidate = inputPath.replace(/\.[^./\\]+$/, '') + '.about.md';
-  if (existsSync(candidate)) {
+  const candidate = aboutCandidates(inputPath).find((p) => existsSync(p));
+  if (candidate) {
     return readFileSync(candidate, 'utf8').trim() || null;
   }
   return null;

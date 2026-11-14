@@ -37,7 +37,7 @@ subs-translate movie.srt --limit 5            # пробный прогон: п�
 subs-translate movie.srt --range 100-130      # только реплики 100–130
 subs-translate movie.srt --resume             # докончить после обрыва
 subs-translate movie.srt --dry-run            # показать полный промпт первой реплики и выйти
-subs-translate movie.srt --about-file movie.about.md
+subs-translate movie.srt --about-file notes/synopsis.md
 subs-translate movie.srt -o out/ru.srt
 subs-translate movie.srt --price-in 0.3 --price-out 1.2   # + оценка стоимости
 subs-translate movie.mkv                      # видео: список встроенных дорожек и выход
@@ -64,7 +64,7 @@ subs-translate movie.mkv --sub-track 0    # извлечь дорожку 0 и �
   (`movie.track0.eng.srt`, язык берётся из метаданных), дальше весь пайплайн работает
   с этим файлом: выход — `movie.track0.eng.ru.srt` рядом с видео, sidecar и `--resume`
   как обычно (продолжать — тем же `movie.mkv --sub-track N --resume`);
-- если рядом с видео лежит `movie.about.md`, он подхватывается и для извлечённого входа;
+- если рядом с видео лежит `movie.txt` или `movie.md`, он подхватывается и для извлечённого входа;
 - повторный запуск перезаписывает извлечённый файл (это дёшево) и продолжает по sidecar.
 
 ### Аудиодорожка → субтитры (STT)
@@ -126,7 +126,7 @@ subs-translate movie.mp4 --audio-track 0  # речь → субтитры → п
 | Флаг | По умолчанию | Что делает |
 |---|---|---|
 | `-o, --out <path>` | `<input>.ru.srt` | выходной файл; вход никогда не перезаписывается |
-| `--about <text>` / `--about-file <path>` | `<input>.about.md`, если есть | синопсис + глоссарий, см. ниже |
+| `--about <text>` / `--about-file <path>` | `<input>.txt`, затем `<input>.md`, если есть | синопсис + глоссарий, см. ниже |
 | `--sub-track <n>` | — | дорожка встроенных субтитров видео; для видео без флага — печатается список |
 | `--audio-track <n>` | — | транскрибировать аудиодорожку видео (Whisper) и переводить её |
 | `--stt-model <id>` / `--stt-base-url <url>` / `--stt-api-key <key>` | env `STT_MODEL` / `STT_BASE_URL` / `STT_API_KEY` | параметры STT-endpoint'а; модель обязательна |
@@ -201,7 +201,8 @@ cp endpoints.example.json endpoints.json   # и вписать OPENROUTER_API_KE
 ## About-файл: синопсис и глоссарий
 
 `--about` / `--about-file` не обязателен, но именно он делает перевод «человеческим».
-Шаблон `movie.about.md`:
+Без флагов подхватывается файл рядом со входом с тем же именем: для `movie.mkv` или `movie.srt`
+сначала `movie.txt`, затем `movie.md`. Шаблон `movie.txt`:
 
 ```markdown
 «Деление» (The Division), криминальный триллер, 2024.

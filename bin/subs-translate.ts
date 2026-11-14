@@ -26,7 +26,7 @@ const USAGE = `subs-translate — переводит .srt реплика за р
 Опции:
   -o, --out <path>            выходной файл (по умолчанию <input>.ru.srt)
       --about <text>          синопсис текстом
-      --about-file <path>     синопсис из файла (по умолчанию <input>.about.md, если есть)
+      --about-file <path>     синопсис из файла (по умолчанию <input>.txt или <input>.md, если есть)
       --sub-track <n>         извлечь встроенную дорожку субтитров <n> из видео и переводить её
       --audio-track <n>       транскрибировать аудиодорожку <n> через Whisper и переводить её
                               (STT_MODEL + STT_API_KEY/GROQ_API_TOKEN в .env)
