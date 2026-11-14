@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 export const DEFAULT_BASE_URL = 'https://api.paretoinference.com/v1';
@@ -25,10 +27,16 @@ export function resolveConfig({
     // missing .env is fine
   }
   return {
-    apiKey: apiKey ?? process.env.PARETO_API_KEY ?? process.env.OPENAI_API_KEY ?? null,
+    apiKey: apiKey ?? process.env.OPENAI_API_KEY ?? null,
     baseUrl: baseUrl ?? process.env.SUBS_BASE_URL ?? process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL,
     model: model ?? process.env.SUBS_MODEL ?? DEFAULT_MODEL,
   };
+}
+
+/** synopsis files next to the input, in lookup order: movie.mkv → movie.txt, movie.md */
+export function aboutCandidates(inputPath: string): string[] {
+  const base = inputPath.replace(/\.[^./\\]+$/, '');
+  return [`${base}.txt`, `${base}.md`];
 }
 
 export function discoverAbout(
@@ -42,8 +50,8 @@ export function discoverAbout(
     }
     return readFileSync(aboutFile, 'utf8').trim() || null;
   }
-  const candidate = inputPath.replace(/\.[^./\\]+$/, '') + '.about.md';
-  if (existsSync(candidate)) {
+  const candidate = aboutCandidates(inputPath).find((p) => existsSync(p));
+  if (candidate) {
     return readFileSync(candidate, 'utf8').trim() || null;
   }
   return null;
@@ -53,4 +61,16 @@ export function defaultOutputPath(inputPath: string): string {
   const ext = path.extname(inputPath);
   const base = ext ? inputPath.slice(0, -ext.length) : inputPath;
   return `${base}.ru.srt`;
+}
+
+/** extracted/transcribed input lives in the temp work dir; the translation goes next to the original input */
+export function videoOutputPath(inputPath: string, effectiveInput: string): string {
+  return path.join(path.dirname(inputPath), path.basename(defaultOutputPath(effectiveInput)));
+}
+
+/** per-folder scratch dir in the OS temp: <tmp>/subs-translate/<folder>-<sha1(abs folder)[:10]> */
+export function workDir(filePath: string): string {
+  const dir = path.dirname(path.resolve(filePath));
+  const hash = createHash('sha1').update(dir).digest('hex').slice(0, 10);
+  return path.join(tmpdir(), 'subs-translate', `${path.basename(dir) || 'root'}-${hash}`);
 }

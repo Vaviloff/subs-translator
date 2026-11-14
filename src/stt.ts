@@ -8,6 +8,7 @@ import { BASE_DELAYS_MS, describeErr, isRetryable, retryAfterMs } from './transl
 import type { RetryInfo } from './translate.ts';
 import { detectSilences, probeDuration, sliceAudioChunk } from './video.ts';
 import { computeChunkBoundaries, parseSilences } from './chunk.ts';
+import { workDir } from './config.ts';
 
 export const DEFAULT_STT_BASE_URL = 'https://api.groq.com/openai/v1';
 const MAX_ATTEMPTS = 5;
@@ -61,11 +62,10 @@ export function createSttClient({ apiKey, baseUrl }: { apiKey: string; baseUrl: 
   return new OpenAI({ apiKey, baseURL: baseUrl, maxRetries: 0, timeout: STT_TIMEOUT_MS });
 }
 
-/** deterministic working names: <video>.audio<n>{.flac-machinery}.srt */
+/** deterministic working names in the temp work dir: <video>.audio<n>{.stt/,.srt} */
 export function audioBasePath(videoPath: string, track: number): string {
-  const ext = path.extname(videoPath);
-  const base = ext ? videoPath.slice(0, -ext.length) : videoPath;
-  return `${base}.audio${track}`;
+  const stem = path.basename(videoPath, path.extname(videoPath));
+  return path.join(workDir(videoPath), `${stem}.audio${track}`);
 }
 
 export interface WhisperSegment {

@@ -19,7 +19,7 @@ cp .env.example .env      # и вписать ключ
 `.env`:
 
 ```
-PARETO_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
 SUBS_BASE_URL=https://api.paretoinference.com/v1
 SUBS_MODEL=z-ai/glm-5.3-flash
 GROQ_API_TOKEN=gsk-...        # STT (Whisper), см. «Аудиодорожка → субтитры»
@@ -27,17 +27,17 @@ STT_MODEL=whisper-large-v3-turbo
 ```
 
 Любое значение можно переопределить флагами `--api-key` / `--base-url` / `--model`;
-вместо `PARETO_API_KEY` подойдёт `OPENAI_API_KEY`, вместо `SUBS_BASE_URL` — `OPENAI_BASE_URL`.
+вместо `SUBS_BASE_URL` подойдёт `OPENAI_BASE_URL`.
 
 ## Использование
 
 ```sh
-subs-translate movie.srt                      # → movie.ru.srt (+ movie.ru.srt.progress.jsonl)
+subs-translate movie.srt                      # → movie.ru.srt (+ sidecar во временной папке)
 subs-translate movie.srt --limit 5            # пробный прогон: первые 5 реплик
 subs-translate movie.srt --range 100-130      # только реплики 100–130
 subs-translate movie.srt --resume             # докончить после обрыва
 subs-translate movie.srt --dry-run            # показать полный промпт первой реплики и выйти
-subs-translate movie.srt --about-file movie.about.md
+subs-translate movie.srt --about-file notes/synopsis.md
 subs-translate movie.srt -o out/ru.srt
 subs-translate movie.srt --price-in 0.3 --price-out 1.2   # + оценка стоимости
 subs-translate movie.mkv                      # видео: список встроенных дорожек и выход
@@ -46,6 +46,24 @@ subs-translate movie.mp4 --audio-track 0      # видео: речь из ауд
 ```
 
 Прогресс (реплика k/n, время, ETA, токены) идёт в stderr; stdout остаётся чистым. `-q` выключает прогресс.
+
+### Интерактивный режим
+
+```sh
+subs-translate                  # без аргументов в терминале — вопросы с выбором стрелками
+subs-translate movie.mkv -i     # то же, файл уже выбран
+```
+
+Утилита спрашивает по шагам: файл (список `.srt` и видео из текущей папки), дорожку видео
+(субтитры или речь → Whisper; растровые дорожки не выбираются), синопсис (готовый about-файл,
+другой файл или текст, введённый/вставленный прямо в терминал — конец ввода: две пустые строки
+подряд или Ctrl+D; введённый текст можно сохранить в `<вход>.txt`, тогда он подхватится и
+при `--resume`), куда сохранить перевод, продолжать ли по sidecar (если он есть), что сделать
+(весь файл, первые N реплик, диапазон или только промпт) и, если в папке есть `endpoints.json`, —
+один endpoint или несколько.
+Перед запуском печатается та же команда флагами — её можно скопировать и запускать без вопросов.
+Флаги, заданные вместе с `-i`, не спрашиваются; остальные настройки берутся по умолчанию.
+Без терминала (stdin/stdout в pipe) интерактивный режим не включается.
 
 ### Видео со встроенными субтитрами
 
@@ -60,10 +78,11 @@ subs-translate movie.mkv --sub-track 0    # извлечь дорожку 0 и �
 - без `--sub-track` печатается таблица дорожек: номер (то, что идёт в `--sub-track`),
   кодек, язык, заголовок; растровые дорожки (PGS, DVD/VobSub, DVB) помечены — их
   в текст не извлечь;
-- с `--sub-track N` дорожка конвертируется в SRT и сохраняется рядом с видео
+- с `--sub-track N` дорожка конвертируется в SRT и сохраняется во временной папке
   (`movie.track0.eng.srt`, язык берётся из метаданных), дальше весь пайплайн работает
-  с этим файлом: выход — `movie.track0.eng.ru.srt`, sidecar и `--resume` как обычно;
-- если рядом с видео лежит `movie.about.md`, он подхватывается и для извлечённого входа;
+  с этим файлом: выход — `movie.track0.eng.ru.srt` рядом с видео, sidecar и `--resume`
+  как обычно (продолжать — тем же `movie.mkv --sub-track N --resume`);
+- если рядом с видео лежит `movie.txt` или `movie.md`, он подхватывается и для извлечённого входа;
 - повторный запуск перезаписывает извлечённый файл (это дёшево) и продолжает по sidecar.
 
 ### Аудиодорожка → субтитры (STT)
@@ -85,11 +104,11 @@ subs-translate movie.mp4 --audio-track 0  # речь → субтитры → п
   LMStudio и прочие локальные серверы подключаются той же тройкой
   (`STT_BASE_URL=http://localhost:1234/v1`); OpenRouter endpoint'а
   `/audio/transcriptions` не имеет;
-- промежуточные файлы лежат рядом с видео: `movie.audio0.srt` — распознанные субтитры
-  (дальше весь пайплайн работает с ними: выход `movie.audio0.ru.srt`), `movie.audio0.stt/` —
-  чанки FLAC, их JSON-кэш и план разрезки. Повторный запуск переиспользует кэш —
-  готовые чанки заново не транскрибируются и ffprobe/ffmpeg почти не зовутся;
-  нужно перераспознать (другой моделью) — удалите `movie.audio0.srt` и `movie.audio0.stt/`;
+- промежуточные файлы лежат во временной папке (см. «Рабочие файлы»): `movie.audio0.srt` —
+  распознанные субтитры (дальше весь пайплайн работает с ними: выход `movie.audio0.ru.srt`
+  рядом с видео), `movie.audio0.stt/` — чанки FLAC, их JSON-кэш и план разрезки. Повторный
+  запуск переиспользует кэш — готовые чанки заново не транскрибируются и ffprobe/ffmpeg почти
+  не зовутся; нужно перераспознать (другой моделью) — удалите там `movie.audio0.srt` и `movie.audio0.stt/`;
 - аудио режется на чанки ≤10 минут по тишине (слова на стыках не рвутся; если в окне
   тишины нет — жёсткий разрез), чанки транскрибируются последовательно, 429/5xx/сеть
   ретраятся как в переводе. Groq: `whisper-large-v3-turbo` ≈ $0.04/час аудио,
@@ -124,8 +143,9 @@ subs-translate movie.mp4 --audio-track 0  # речь → субтитры → п
 
 | Флаг | По умолчанию | Что делает |
 |---|---|---|
+| `-i, --interactive` | без аргументов — да | вопросы с выбором стрелками, см. «Интерактивный режим» |
 | `-o, --out <path>` | `<input>.ru.srt` | выходной файл; вход никогда не перезаписывается |
-| `--about <text>` / `--about-file <path>` | `<input>.about.md`, если есть | синопсис + глоссарий, см. ниже |
+| `--about <text>` / `--about-file <path>` | `<input>.txt`, затем `<input>.md`, если есть | синопсис + глоссарий, см. ниже |
 | `--sub-track <n>` | — | дорожка встроенных субтитров видео; для видео без флага — печатается список |
 | `--audio-track <n>` | — | транскрибировать аудиодорожку видео (Whisper) и переводить её |
 | `--stt-model <id>` / `--stt-base-url <url>` / `--stt-api-key <key>` | env `STT_MODEL` / `STT_BASE_URL` / `STT_API_KEY` | параметры STT-endpoint'а; модель обязательна |
@@ -177,7 +197,7 @@ cp endpoints.example.json endpoints.json   # и вписать OPENROUTER_API_KE
 
 ```json
 [
-  { "name": "pareto",  "baseUrl": "https://api.paretoinference.com/v1", "apiKey": "env:PARETO_API_KEY",     "model": "z-ai/glm-5.3-flash" },
+  { "name": "pareto",  "baseUrl": "https://api.paretoinference.com/v1", "apiKey": "env:OPENAI_API_KEY",     "model": "z-ai/glm-5.3-flash" },
   { "name": "or-glm",  "baseUrl": "https://openrouter.ai/api/v1",       "apiKey": "env:OPENROUTER_API_KEY", "model": "z-ai/glm-5.3-flash", "extraBody": { "usage": { "include": true } } },
   { "name": "or-muse", "baseUrl": "https://openrouter.ai/api/v1",       "apiKey": "env:OPENROUTER_API_KEY", "model": "meta/muse-spark-1.3-contributor", "extraBody": { "usage": { "include": true } } }
 ]
@@ -200,7 +220,8 @@ cp endpoints.example.json endpoints.json   # и вписать OPENROUTER_API_KE
 ## About-файл: синопсис и глоссарий
 
 `--about` / `--about-file` не обязателен, но именно он делает перевод «человеческим».
-Шаблон `movie.about.md`:
+Без флагов подхватывается файл рядом со входом с тем же именем: для `movie.mkv` или `movie.srt`
+сначала `movie.txt`, затем `movie.md`. Шаблон `movie.txt`:
 
 ```markdown
 «Деление» (The Division), криминальный триллер, 2024.
@@ -220,9 +241,18 @@ Names and terms:
 
 Глоссарий живёт прямо внутри about-файла — отдельного флага нет.
 
+## Рабочие файлы
+
+Всё промежуточное — sidecar, извлечённые и распознанные `.srt`, STT-кэш `.stt/` — лежит не
+рядом с видео, а во временной папке ОС: `<tmp>/subs-translate/<папка>-<хеш>/` (на Linux
+обычно `/tmp/subs-translate/…`; одна папка на каждую исходную директорию, путь печатается при
+запуске). Рядом с входом появляется только готовый перевод. После успешного прогона файлы
+не удаляются — их переиспользуют `--resume` и STT-кэш; удалить можно вручную. Учтите, что
+`/tmp` может очищаться при перезагрузке — тогда прогресс и кэш распознавания пропадут.
+
 ## Resume и sidecar
 
-Каждая переведённая реплика дописывается в `<out>.progress.jsonl`:
+Каждая переведённая реплика дописывается в `<tmp>/subs-translate/…/<out>.progress.jsonl`:
 
 ```json
 {"i":413,"h":"9f86d0818...","src":"He didn't <i>leave</i>.","ru":"Он не <i>уходил</i>.","tokens":{"in":812,"out":31},"model":"z-ai/glm-5.3-flash","at":"2026-09-12T17:04:11.902Z"}

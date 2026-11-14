@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { workDir } from '../src/config.ts';
 import {
   detectSilences,
   extractSubtitle,
@@ -74,13 +75,14 @@ test('formatTrackList: track, codec, lang, title, markers, bitmap note', () => {
   assert.doesNotMatch(lines[2], /растровые/);
 });
 
-test('extractedPath: embeds track and language, skips junk metadata', () => {
-  assert.equal(extractedPath('/a/movie.mkv', 0, 'eng'), '/a/movie.track0.eng.srt');
-  assert.equal(extractedPath('/a/movie.mkv', 2, null), '/a/movie.track2.srt');
-  assert.equal(extractedPath('/a/movie.mkv', 1, 'und'), '/a/movie.track1.srt');
-  assert.equal(extractedPath('/a/movie.mkv', 1, 'not a lang!'), '/a/movie.track1.srt');
-  assert.equal(extractedPath('/a/movie.mkv', 3, 'en-US'), '/a/movie.track3.en-us.srt');
-  assert.equal(extractedPath('/a/movie', 0, 'RU'), '/a/movie.track0.ru.srt');
+test('extractedPath: in the temp work dir, embeds track and language, skips junk metadata', () => {
+  const dir = workDir('/a/movie.mkv');
+  assert.equal(extractedPath('/a/movie.mkv', 0, 'eng'), path.join(dir, 'movie.track0.eng.srt'));
+  assert.equal(extractedPath('/a/movie.mkv', 2, null), path.join(dir, 'movie.track2.srt'));
+  assert.equal(extractedPath('/a/movie.mkv', 1, 'und'), path.join(dir, 'movie.track1.srt'));
+  assert.equal(extractedPath('/a/movie.mkv', 1, 'not a lang!'), path.join(dir, 'movie.track1.srt'));
+  assert.equal(extractedPath('/a/movie.mkv', 3, 'en-US'), path.join(dir, 'movie.track3.en-us.srt'));
+  assert.equal(extractedPath('/a/movie', 0, 'RU'), path.join(dir, 'movie.track0.ru.srt'));
 });
 
 const audioFixture = JSON.stringify({

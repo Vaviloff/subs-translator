@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { parse, serialize } from '../src/srt.ts';
 import { cleanCues } from '../src/clean.ts';
-import { defaultOutputPath, discoverAbout, resolveConfig } from '../src/config.ts';
+import { discoverAbout, resolveConfig, videoOutputPath, workDir } from '../src/config.ts';
 import { buildSystem, buildUser } from '../src/prompt.ts';
 import { createClient, translateCue } from '../src/translate.ts';
 import type { RetryInfo } from '../src/translate.ts';
@@ -16,16 +16,20 @@ import { extractSubtitle, extractedPath, formatAudioTrackList, formatTrackList, 
 import type { AudioStream, SubStream } from '../src/video.ts';
 import { assertSttConfig, resolveSttConfig, transcribeAudioTrack } from '../src/stt.ts';
 import type { Pool } from '../src/types.ts';
+import { runWizard } from '../src/wizard.ts';
+import { displayPath, formatCommand, programWords, quoteArg } from '../src/launch.ts';
 
 const USAGE = `subs-translate — переводит .srt реплика за репликой, с контекстом и синопсисом
 
 Использование:
   subs-translate <input.srt | video> [options]
+  subs-translate                    интерактивный режим: вопросы с выбором стрелками
 
 Опции:
+  -i, --interactive           интерактивный режим; уже заданные флаги не спрашиваются
   -o, --out <path>            выходной файл (по умолчанию <input>.ru.srt)
       --about <text>          синопсис текстом
-      --about-file <path>     синопсис из файла (по умолчанию <input>.about.md, если есть)
+      --about-file <path>     синопсис из файла (по умолчанию <input>.txt или <input>.md, если есть)
       --sub-track <n>         извлечь встроенную дорожку субтитров <n> из видео и переводить её
       --audio-track <n>       транскрибировать аудиодорожку <n> через Whisper и переводить её
                               (STT_MODEL + STT_API_KEY/GROQ_API_TOKEN в .env)
@@ -42,7 +46,7 @@ const USAGE = `subs-translate — переводит .srt реплика за р
       --max-line-len <n>      максимальная длина строки (42)
       --model <id>            модель (z-ai/glm-5.3-flash)
       --base-url <url>        endpoint (https://api.paretoinference.com/v1)
-      --api-key <key>         ключ (env PARETO_API_KEY || OPENAI_API_KEY)
+      --api-key <key>         ключ (env OPENAI_API_KEY)
       --endpoints <file>      JSON-список endpoint'ов, round-robin (см. endpoints.example.json)
       --range <A-B>           диапазон номеров реплик, включительно
       --limit <n>             только первые n реплик диапазона (с --resume — первые n непереведённых)
@@ -146,6 +150,7 @@ function parseCliArgs() {
         resume: { type: 'boolean' },
         'dry-run': { type: 'boolean' },
         quiet: { type: 'boolean', short: 'q' },
+        interactive: { type: 'boolean', short: 'i' },
       },
     });
   } catch (err) {
@@ -155,12 +160,34 @@ function parseCliArgs() {
 
 async function main(): Promise<number> {
   const parsed = parseCliArgs();
-  const values = parsed.values;
-  if (parsed.positionals.length !== 1) {
+  let values = parsed.values;
+  let positionals = parsed.positionals;
+  const noArgs = process.argv.length <= 2;
+  if (values.interactive || noArgs) {
+    const tty = process.stdin.isTTY && process.stdout.isTTY;
+    if (values.interactive && !tty) die('интерактивный режим требует терминал');
+    if (tty) {
+      if (positionals.length > 1) die(`expected at most one input file with --interactive\n\n${USAGE}`);
+      let answers;
+      try {
+        answers = await runWizard({ input: positionals[0], values });
+      } catch (err) {
+        if ((err as Error).name === 'ExitPromptError') {
+          console.error('Отменено');
+          return 130;
+        }
+        die((err as Error).message);
+      }
+      if (!answers) return 0;
+      values = answers.values;
+      positionals = [answers.input];
+    }
+  }
+  if (positionals.length !== 1) {
     die(`expected exactly one input file: an .srt or a video\n\n${USAGE}`);
   }
 
-  const inputPath = path.resolve(parsed.positionals[0]);
+  const inputPath = path.resolve(positionals[0]);
   if (!existsSync(inputPath)) die(`input file not found: ${inputPath}`);
   const subTrack = intOption(values, 'sub-track');
   const audioTrack = intOption(values, 'audio-track');
@@ -199,6 +226,7 @@ async function main(): Promise<number> {
     }
     const extracted = extractedPath(inputPath, stream.track, stream.language);
     try {
+      mkdirSync(path.dirname(extracted), { recursive: true });
       writeFileSync(extracted, data);
     } catch (err) {
       die(`cannot write ${extracted}: ${(err as Error).message}`);
@@ -265,16 +293,20 @@ async function main(): Promise<number> {
     }
     console.log(`\nАудиодорожки в ${path.basename(inputPath)}:`);
     for (const line of formatAudioTrackList(audioStreams)) console.log(`  ${line}`);
-    const arg = path.relative(process.cwd(), inputPath) || inputPath;
-    console.log(`\nПеревести дорожку субтитров: subs-translate ${arg} --sub-track <номер>`);
+    const cmd = [...programWords(), displayPath(inputPath)].map(quoteArg).join(' ');
+    console.log(`\nПеревести дорожку субтитров: ${cmd} --sub-track <номер>`);
     console.log(
-      `Транскрибировать речь:      subs-translate ${arg} --audio-track <номер>` +
+      `Транскрибировать речь:      ${cmd} --audio-track <номер>` +
         `  (нужны STT_MODEL и STT_API_KEY/GROQ_API_TOKEN в .env)`,
     );
     return 0;
   }
 
-  const outPath = path.resolve(values.out ?? defaultOutputPath(effectiveInput));
+  if (effectiveInput !== inputPath && !quiet) {
+    console.error(`Рабочие файлы: ${workDir(inputPath)}`);
+  }
+  // извлечённый/распознанный вход лежит во временной папке — перевод кладём рядом с видео
+  const outPath = path.resolve(values.out ?? videoOutputPath(inputPath, effectiveInput));
   if (outPath === inputPath || outPath === effectiveInput) {
     die('refusing to overwrite the input file: use -o <path>');
   }
@@ -378,7 +410,7 @@ async function main(): Promise<number> {
   }
 
   if (!pool && !config.apiKey) {
-    die('no API key: put PARETO_API_KEY=... into .env (see .env.example) or pass --api-key', 1);
+    die('no API key: put OPENAI_API_KEY=... into .env (see .env.example) or pass --api-key', 1);
   }
   const client = pool ?? createClient({ apiKey: config.apiKey, baseUrl: config.baseUrl });
 
@@ -439,10 +471,13 @@ async function main(): Promise<number> {
 
   const resumeHint = (): void => {
     console.error(`Прогресс сохранён в ${sidecar}`);
-    const rangePart = values.range !== undefined ? ` --range ${values.range}` : '';
-    console.error(
-      `Продолжить: subs-translate ${path.relative(process.cwd(), effectiveInput) || effectiveInput} --resume${rangePart}`,
-    );
+    const argv = [displayPath(inputPath)];
+    if (subTrack !== undefined) argv.push('--sub-track', String(subTrack));
+    else if (audioTrack !== undefined) argv.push('--audio-track', String(audioTrack));
+    argv.push('--resume');
+    if (values.range !== undefined) argv.push('--range', values.range);
+    if (values.out !== undefined) argv.push('-o', values.out);
+    console.error(`Продолжить: ${formatCommand(argv)}`);
   };
   const onInterrupt = (signal: string): void => {
     store.close();
