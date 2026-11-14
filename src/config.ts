@@ -27,7 +27,7 @@ export function resolveConfig({
     // missing .env is fine
   }
   return {
-    apiKey: apiKey ?? process.env.PARETO_API_KEY ?? process.env.OPENAI_API_KEY ?? null,
+    apiKey: apiKey ?? process.env.OPENAI_API_KEY ?? null,
     baseUrl: baseUrl ?? process.env.SUBS_BASE_URL ?? process.env.OPENAI_BASE_URL ?? DEFAULT_BASE_URL,
     model: model ?? process.env.SUBS_MODEL ?? DEFAULT_MODEL,
   };

@@ -19,7 +19,7 @@ cp .env.example .env      # и вписать ключ
 `.env`:
 
 ```
-PARETO_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
 SUBS_BASE_URL=https://api.paretoinference.com/v1
 SUBS_MODEL=z-ai/glm-5.3-flash
 GROQ_API_TOKEN=gsk-...        # STT (Whisper), см. «Аудиодорожка → субтитры»
@@ -27,7 +27,7 @@ STT_MODEL=whisper-large-v3-turbo
 ```
 
 Любое значение можно переопределить флагами `--api-key` / `--base-url` / `--model`;
-вместо `PARETO_API_KEY` подойдёт `OPENAI_API_KEY`, вместо `SUBS_BASE_URL` — `OPENAI_BASE_URL`.
+вместо `SUBS_BASE_URL` подойдёт `OPENAI_BASE_URL`.
 
 ## Использование
 
@@ -178,7 +178,7 @@ cp endpoints.example.json endpoints.json   # и вписать OPENROUTER_API_KE
 
 ```json
 [
-  { "name": "pareto",  "baseUrl": "https://api.paretoinference.com/v1", "apiKey": "env:PARETO_API_KEY",     "model": "z-ai/glm-5.3-flash" },
+  { "name": "pareto",  "baseUrl": "https://api.paretoinference.com/v1", "apiKey": "env:OPENAI_API_KEY",     "model": "z-ai/glm-5.3-flash" },
   { "name": "or-glm",  "baseUrl": "https://openrouter.ai/api/v1",       "apiKey": "env:OPENROUTER_API_KEY", "model": "z-ai/glm-5.3-flash", "extraBody": { "usage": { "include": true } } },
   { "name": "or-muse", "baseUrl": "https://openrouter.ai/api/v1",       "apiKey": "env:OPENROUTER_API_KEY", "model": "meta/muse-spark-1.3-contributor", "extraBody": { "usage": { "include": true } } }
 ]

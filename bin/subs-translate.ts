@@ -42,7 +42,7 @@ const USAGE = `subs-translate — переводит .srt реплика за р
       --max-line-len <n>      максимальная длина строки (42)
       --model <id>            модель (z-ai/glm-5.3-flash)
       --base-url <url>        endpoint (https://api.paretoinference.com/v1)
-      --api-key <key>         ключ (env PARETO_API_KEY || OPENAI_API_KEY)
+      --api-key <key>         ключ (env OPENAI_API_KEY)
       --endpoints <file>      JSON-список endpoint'ов, round-robin (см. endpoints.example.json)
       --range <A-B>           диапазон номеров реплик, включительно
       --limit <n>             только первые n реплик диапазона (с --resume — первые n непереведённых)
@@ -385,7 +385,7 @@ async function main(): Promise<number> {
   }
 
   if (!pool && !config.apiKey) {
-    die('no API key: put PARETO_API_KEY=... into .env (see .env.example) or pass --api-key', 1);
+    die('no API key: put OPENAI_API_KEY=... into .env (see .env.example) or pass --api-key', 1);
   }
   const client = pool ?? createClient({ apiKey: config.apiKey, baseUrl: config.baseUrl });
 
